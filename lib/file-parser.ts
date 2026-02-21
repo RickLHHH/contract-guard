@@ -218,13 +218,24 @@ const MOCK_CONTRACTS: Record<string, string> = {
 日期：____年__月__日        日期：____年__月__日`,
 };
 
-// Parse file content
+// Parse file content - compatible with both browser and server environments
 export async function parseFile(file: File): Promise<{ text: string; type: string }> {
+  // For server-side rendering/build, return mock data directly
+  if (typeof window === 'undefined') {
+    const mockType = detectContractType(file.name);
+    const mockText = MOCK_CONTRACTS[mockType] || MOCK_CONTRACTS.procurement;
+    
+    return {
+      text: mockText,
+      type: mockType,
+    };
+  }
+  
+  // Browser environment - use FileReader
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     
     reader.onload = () => {
-      const content = reader.result as string;
       // For demo purposes, return mock content based on filename
       const mockType = detectContractType(file.name);
       const mockText = MOCK_CONTRACTS[mockType] || MOCK_CONTRACTS.procurement;
