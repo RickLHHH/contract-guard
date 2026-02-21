@@ -69,6 +69,28 @@ const createMockPrisma = (): PrismaClient => {
         throw new Error('Contract not found');
       },
       delete: async () => ({}),
+      groupBy: async (args: any) => {
+        // Simple mock implementation for groupBy
+        const { by, _count } = args;
+        if (!by || !Array.isArray(by)) return [];
+        
+        const groups = new Map();
+        contracts.forEach(contract => {
+          const key = by.map((field: string) => (contract as any)[field]).join('|');
+          if (!groups.has(key)) {
+            const group: any = {};
+            by.forEach((field: string) => group[field] = (contract as any)[field]);
+            if (_count) group._count = { [Object.keys(_count)[0] || 'id']: 0 };
+            groups.set(key, group);
+          }
+          if (_count) {
+            const countField = Object.keys(_count)[0] || 'id';
+            groups.get(key)._count[countField]++;
+          }
+        });
+        
+        return Array.from(groups.values());
+      },
     },
     user: {
       findMany: async () => users,
