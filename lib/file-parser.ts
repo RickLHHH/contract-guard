@@ -218,45 +218,9 @@ const MOCK_CONTRACTS: Record<string, string> = {
 日期：____年__月__日        日期：____年__月__日`,
 };
 
-// Parse file content - compatible with both browser and server environments
-export async function parseFile(file: File): Promise<{ text: string; type: string }> {
-  // For server-side rendering/build, return mock data directly
-  if (typeof window === 'undefined') {
-    const mockType = detectContractType(file.name);
-    const mockText = MOCK_CONTRACTS[mockType] || MOCK_CONTRACTS.procurement;
-    
-    return {
-      text: mockText,
-      type: mockType,
-    };
-  }
-  
-  // Browser environment - use FileReader
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    
-    reader.onload = () => {
-      // For demo purposes, return mock content based on filename
-      const mockType = detectContractType(file.name);
-      const mockText = MOCK_CONTRACTS[mockType] || MOCK_CONTRACTS.procurement;
-      
-      resolve({
-        text: mockText,
-        type: mockType,
-      });
-    };
-    
-    reader.onerror = () => {
-      reject(new Error('Failed to read file'));
-    };
-    
-    // For demo, we read as text. In production, use appropriate parsers
-    reader.readAsText(file);
-  });
-}
-
 // Detect contract type from filename
 function detectContractType(filename: string): string {
+  if (!filename) return 'procurement';
   const lower = filename.toLowerCase();
   if (lower.includes('sale') || lower.includes('销售') || lower.includes('xs')) {
     return 'sales';
@@ -273,6 +237,35 @@ function detectContractType(filename: string): string {
   return 'procurement';
 }
 
+// Parse file content - compatible with both browser and server environments
+export async function parseFile(file: File): Promise<{ text: string; type: string }> {
+  try {
+    // Get filename safely
+    const filename = file.name || 'unknown.pdf';
+    const mockType = detectContractType(filename);
+    const mockText = MOCK_CONTRACTS[mockType] || MOCK_CONTRACTS.procurement;
+    
+    // In a real production environment, we would:
+    // 1. For server-side: use pdf-parse, mammoth, etc.
+    // 2. For browser-side: use FileReader to read the file
+    // 
+    // For this demo, we return mock contract text based on filename
+    // This ensures the system works without complex file parsing setup
+    
+    return {
+      text: mockText,
+      type: mockType,
+    };
+  } catch (error) {
+    console.error('Error in parseFile:', error);
+    // Return default procurement contract as fallback
+    return {
+      text: MOCK_CONTRACTS.procurement,
+      type: 'procurement',
+    };
+  }
+}
+
 // Extract key information from contract text
 export function extractContractInfo(text: string): {
   title: string;
@@ -280,6 +273,15 @@ export function extractContractInfo(text: string): {
   counterparty: string;
   amount: number | null;
 } {
+  if (!text) {
+    return {
+      title: '未命名合同',
+      type: 'OTHERS',
+      counterparty: '未知主体',
+      amount: null,
+    };
+  }
+  
   // Extract title
   const titleMatch = text.match(/^(.*?)(合同|协议)/m);
   const title = titleMatch ? titleMatch[0] : '未命名合同';
@@ -320,6 +322,8 @@ export function extractContractInfo(text: string): {
 export function splitIntoClauses(text: string): Array<{ title: string; content: string }> {
   const clauses: Array<{ title: string; content: string }> = [];
   
+  if (!text) return clauses;
+  
   // Match clauses like "第一条 ...", "第1条 ...", etc.
   const clauseRegex = /第[一二三四五六七八九十百千零\d]+条[、.\s]+([^\n]+)\n([\s\S]*?)(?=第[一二三四五六七八九十百千零\d]+条|$)/g;
   
@@ -348,6 +352,7 @@ export function findTextPosition(
   searchText: string, 
   startIndex: number = 0
 ): { start: number; end: number } | null {
+  if (!text || !searchText) return null;
   const index = text.indexOf(searchText, startIndex);
   if (index === -1) return null;
   
@@ -359,6 +364,7 @@ export function findTextPosition(
 
 // Clean extracted text
 export function cleanText(text: string): string {
+  if (!text) return '';
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
@@ -368,6 +374,7 @@ export function cleanText(text: string): string {
 
 // Get file type label
 export function getFileTypeLabel(filename: string): string {
+  if (!filename) return '未知类型';
   const ext = filename.split('.').pop()?.toLowerCase();
   const labels: Record<string, string> = {
     pdf: 'PDF文档',

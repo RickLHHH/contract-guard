@@ -115,7 +115,9 @@ export function UploadContractDialog({
       });
 
       if (!uploadResponse.ok) {
-        throw new Error("上传失败");
+        const errorData = await uploadResponse.json().catch(() => ({ error: '未知错误' }));
+        console.error('Upload failed:', errorData);
+        throw new Error(errorData.error || errorData.details || `上传失败: ${uploadResponse.status}`);
       }
 
       const uploadResult = await uploadResponse.json();
@@ -154,7 +156,8 @@ export function UploadContractDialog({
       onSuccess?.();
     } catch (error) {
       console.error("Upload error:", error);
-      toast.error("上传失败，请重试");
+      const errorMessage = error instanceof Error ? error.message : "上传失败，请重试";
+      toast.error(errorMessage);
     } finally {
       setUploading(false);
       setAnalyzing(false);
