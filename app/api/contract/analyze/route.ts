@@ -4,35 +4,44 @@ import { hybridAnalyze } from '@/lib/rule-engine';
 import { prisma } from '@/lib/prisma';
 import { AIReview, RiskItem } from '@/types';
 
+/**
+ * POST /api/contract/analyze - 分析合同
+ * 结合规则引擎和AI进行全面的合同风险分析
+ */
 export async function POST(request: NextRequest) {
-  console.log('=== Contract Analysis API Called ===');
+  console.log('[API] 合同分析开始');
   
   try {
-    // Log AI configuration
+    // 获取AI配置信息
     const aiConfig = getAIConfig();
-    console.log('AI Configuration:', aiConfig);
+    console.log('[API] AI配置:', {
+      provider: aiConfig.provider,
+      hasQwenKey: aiConfig.hasQwenKey,
+      hasDeepSeekKey: aiConfig.hasDeepSeekKey,
+    });
     
     const body = await request.json();
     const { contractId, text, useAI = true } = body;
     
-    console.log('Request:', { 
+    console.log('[API] 分析请求:', { 
       contractId, 
       textLength: text?.length, 
       textPreview: text?.substring(0, 100),
-      useAI 
+      useAI,
     });
     
+    // 验证参数
     if (!contractId) {
-      console.error('Missing contractId');
+      console.error('[API] 缺少 contractId');
       return NextResponse.json(
-        { error: 'Missing required field: contractId' },
+        { error: '缺少必需参数: contractId' },
         { status: 400 }
       );
     }
     
-    // Handle empty or short text
+    // 处理空或短文本
     if (!text || text.length < 10) {
-      console.log('Text too short, returning empty analysis');
+      console.log('[API] 文本过短，返回基础分析');
       const emptyReview = generateMockAIReview('');
       return NextResponse.json({
         success: true,
@@ -41,49 +50,49 @@ export async function POST(request: NextRequest) {
       });
     }
     
-    // Step 1: Rule Engine Analysis
-    console.log('Step 1: Running rule engine...');
+    // 步骤1: 规则引擎分析
+    console.log('[API] 步骤1: 执行规则引擎分析...');
     const ruleResult = hybridAnalyze(text);
-    console.log('Rule engine result:', {
+    console.log('[API] 规则引擎结果:', {
       ruleRisks: ruleResult.ruleRisks.length,
       keywordRisks: ruleResult.keywordRisks.length,
       score: ruleResult.score,
     });
     
-    // Step 2: AI Analysis
+    // 步骤2: AI分析
     let aiResult: AIReview | null = null;
     let aiError: string | null = null;
     
     if (useAI) {
-      console.log('Step 2: Running AI analysis...');
+      console.log('[API] 步骤2: 执行AI分析...');
       try {
         aiResult = await analyzeContract(text);
-        console.log('AI analysis completed:', {
+        console.log('[API] AI分析完成:', {
           riskCount: aiResult.keyRisks.length,
           riskScore: aiResult.riskScore,
           provider: aiResult.id.startsWith('qwen') ? 'qwen' : 
                    aiResult.id.startsWith('deepseek') ? 'deepseek' : 'mock',
         });
       } catch (error) {
-        aiError = error instanceof Error ? error.message : 'Unknown error';
-        console.error('AI analysis failed:', aiError);
+        aiError = error instanceof Error ? error.message : '未知错误';
+        console.error('[API] AI分析失败:', aiError);
         aiResult = generateMockAIReview(text);
       }
     } else {
-      console.log('AI analysis skipped (useAI=false)');
+      console.log('[API] 跳过AI分析 (useAI=false)');
       aiResult = generateMockAIReview(text);
     }
     
-    // Combine results
+    // 合并结果
     const allRisks = [
       ...ruleResult.ruleRisks,
       ...ruleResult.keywordRisks,
       ...(aiResult?.keyRisks || []),
     ];
     
-    console.log('Combined risks:', allRisks.length);
+    console.log('[API] 合并风险数:', allRisks.length);
     
-    // Deduplicate risks
+    // 去重
     const uniqueRisks = allRisks.filter((risk, index, self) => 
       index === self.findIndex(r => 
         r.explanation === risk.explanation || 
@@ -91,9 +100,9 @@ export async function POST(request: NextRequest) {
       )
     );
     
-    console.log('Unique risks after dedup:', uniqueRisks.length);
+    console.log('[API] 去重后风险数:', uniqueRisks.length);
     
-    // Calculate risk metrics
+    // 计算风险指标
     const highRisks = uniqueRisks.filter(r => r.severity === 'high').length;
     const mediumRisks = uniqueRisks.filter(r => r.severity === 'medium').length;
     
@@ -115,16 +124,22 @@ export async function POST(request: NextRequest) {
       (aiResult?.riskScore || ruleResult.score) - uniqueRisks.length * 2
     ));
     
-    console.log('Risk calculation:', { overallRisk, riskLevel, finalScore, highRisks, mediumRisks });
+    console.log('[API] 风险计算结果:', { overallRisk, riskLevel, finalScore, highRisks, mediumRisks });
     
-    // Save to database
+    // 保存到数据库
+    let savedReview;
     try {
+      // 更新合同状态和风险等级
       await prisma.contract.update({
         where: { id: contractId },
-        data: { riskLevel, status: 'LEGAL_REVIEW' },
+        data: { 
+          riskLevel, 
+          status: 'LEGAL_REVIEW',
+        },
       });
       
-      const savedReview = await prisma.aIReview.create({
+      // 保存AI审查结果
+      savedReview = await prisma.aIReview.create({
         data: {
           contractId,
           overallRisk,
@@ -135,9 +150,10 @@ export async function POST(request: NextRequest) {
         },
       });
       
-      // Create annotations
+      // 创建批注（针对中高风险的发现）
       const annotationPromises = uniqueRisks
         .filter(r => r.severity !== 'low')
+        .slice(0, 20) // 限制批注数量
         .map(r => prisma.annotation.create({
           data: {
             contractId,
@@ -154,17 +170,17 @@ export async function POST(request: NextRequest) {
         }));
       
       await Promise.all(annotationPromises);
-      console.log('Database save successful');
+      console.log('[API] 数据库保存成功，创建了', annotationPromises.length, '个批注');
       
     } catch (dbError) {
-      console.error('Database save error:', dbError);
-      // Continue to return result even if DB save fails
+      console.error('[API] 数据库保存错误:', dbError);
+      // 继续返回结果，即使数据库保存失败
     }
     
     const response = {
       success: true,
       review: {
-        id: `review-${Date.now()}`,
+        id: savedReview?.id || `review-${Date.now()}`,
         contractId,
         overallRisk,
         riskScore: Math.round(finalScore),
@@ -182,22 +198,22 @@ export async function POST(request: NextRequest) {
       },
       debug: {
         aiProvider: aiConfig.provider,
-        aiUsed: useAI,
+        aiUsed: useAI && aiConfig.provider !== 'mock',
         aiError,
         ruleRisksCount: ruleResult.ruleRisks.length,
         aiRisksCount: aiResult?.keyRisks?.length || 0,
       },
     };
     
-    console.log('=== Analysis API Completed ===');
+    console.log('[API] 合同分析完成');
     return NextResponse.json(response);
     
   } catch (error) {
-    console.error('Analyze API error:', error);
+    console.error('[API] 合同分析失败:', error);
     return NextResponse.json(
       { 
-        error: 'Failed to analyze contract', 
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: '合同分析失败', 
+        details: error instanceof Error ? error.message : '未知错误',
       },
       { status: 500 }
     );

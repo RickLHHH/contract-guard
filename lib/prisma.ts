@@ -4,14 +4,14 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-// Check if we're in production without database
+// 检查是否配置了数据库
 const hasDatabase = !!process.env.DATABASE_URL;
 
-// Create a mock Prisma client for demo/development without database
+// 创建 Mock Prisma 客户端（用于演示/开发环境）
 const createMockPrisma = (): PrismaClient => {
-  console.log('Using Mock Prisma Client (no DATABASE_URL detected)');
+  console.log('[Prisma] 使用 Mock 客户端（未配置 DATABASE_URL）');
   
-  // In-memory storage for mock data
+  // 内存存储
   const contracts: Contract[] = [];
   const users: User[] = [
     {
@@ -32,6 +32,15 @@ const createMockPrisma = (): PrismaClient => {
       avatar: '',
       createdAt: new Date(),
     },
+    {
+      id: 'user-3',
+      email: 'director@example.com',
+      name: '王总监',
+      role: UserRole.LEGAL_DIRECTOR,
+      department: '法务部',
+      avatar: '',
+      createdAt: new Date(),
+    },
   ];
   
   let idCounter = 0;
@@ -46,31 +55,88 @@ const createMockPrisma = (): PrismaClient => {
         const contract: Contract = {
           id: generateId(),
           ...data,
+          metadata: data.metadata ? JSON.stringify(data.metadata) : null,
           createdAt: new Date(),
           updatedAt: new Date(),
           completedAt: null,
         };
         contracts.push(contract);
-        console.log('Mock: Created contract', contract.id);
+        console.log('[MockPrisma] 创建合同:', contract.id);
         return contract;
       },
-      findMany: async () => contracts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      findMany: async (args?: any) => {
+        let result = [...contracts].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        
+        // 简单实现 where 过滤
+        if (args?.where) {
+          if (args.where.status) {
+            if (Array.isArray(args.where.status.in)) {
+              result = result.filter(c => args.where.status.in.includes(c.status));
+            } else {
+              result = result.filter(c => c.status === args.where.status);
+            }
+          }
+          if (args.where.type) {
+            result = result.filter(c => c.type === args.where.type);
+          }
+          if (args.where.riskLevel) {
+            result = result.filter(c => c.riskLevel === args.where.riskLevel);
+          }
+        }
+        
+        // 实现 include
+        if (args?.include) {
+          result = result.map(c => ({
+            ...c,
+            creator: users.find(u => u.id === c.creatorId),
+            aiReview: null,
+            _count: { annotations: 0 },
+          }));
+        }
+        
+        // 实现分页
+        if (args?.skip) result = result.slice(args.skip);
+        if (args?.take) result = result.slice(0, args.take);
+        
+        return result;
+      },
       findUnique: async ({ where }: { where: { id: string } }) => {
-        return contracts.find(c => c.id === where.id) || null;
+        const contract = contracts.find(c => c.id === where.id);
+        if (contract) {
+          return {
+            ...contract,
+            creator: users.find(u => u.id === contract.creatorId),
+            aiReview: null,
+            annotations: [],
+          };
+        }
+        return null;
       },
       findFirst: async () => contracts[0] || null,
-      count: async () => contracts.length,
+      count: async (args?: any) => {
+        if (!args?.where) return contracts.length;
+        
+        return contracts.filter(c => {
+          if (args.where.status?.in && !args.where.status.in.includes(c.status)) return false;
+          if (args.where.status && !args.where.status.in && c.status !== args.where.status) return false;
+          if (args.where.riskLevel && c.riskLevel !== args.where.riskLevel) return false;
+          return true;
+        }).length;
+      },
       update: async ({ where, data }: { where: { id: string }, data: any }) => {
         const index = contracts.findIndex(c => c.id === where.id);
         if (index >= 0) {
-          contracts[index] = { ...contracts[index], ...data, updatedAt: new Date() };
+          contracts[index] = { 
+            ...contracts[index], 
+            ...data, 
+            updatedAt: new Date() 
+          };
           return contracts[index];
         }
         throw new Error('Contract not found');
       },
       delete: async () => ({}),
       groupBy: async (args: any) => {
-        // Simple mock implementation for groupBy
         const { by, _count } = args;
         if (!by || !Array.isArray(by)) return [];
         
@@ -101,7 +167,11 @@ const createMockPrisma = (): PrismaClient => {
       },
     },
     contractVersion: {
-      create: async () => ({ id: generateId(), versionNumber: 1 }),
+      create: async ({ data }: { data: any }) => ({ 
+        id: generateId(), 
+        ...data,
+        createdAt: new Date(),
+      }),
       findMany: async () => [],
     },
     aIReview: {
@@ -129,28 +199,59 @@ const createMockPrisma = (): PrismaClient => {
       if (prop in mockHandler) {
         return (mockHandler as any)[prop];
       }
-      // Return empty function for unimplemented methods
       return () => Promise.resolve([]);
     },
   }) as PrismaClient;
 };
 
-// Create real Prisma client or mock
-const createPrisma = () => {
+// 创建真实 Prisma 客户端
+const createPrismaClient = () => {
   if (!hasDatabase) {
     return createMockPrisma();
   }
   
   try {
-    return new PrismaClient();
+    console.log('[Prisma] 使用真实数据库连接');
+    return new PrismaClient({
+      log: process.env.NODE_ENV === 'development' 
+        ? ['query', 'info', 'warn', 'error']
+        : ['error'],
+    });
   } catch (error) {
-    console.warn('Failed to create Prisma client, using mock:', error);
+    console.warn('[Prisma] 创建客户端失败，回退到 Mock:', error);
     return createMockPrisma();
   }
 };
 
-export const prisma = globalForPrisma.prisma ?? createPrisma();
+// 单例模式
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
+}
+
+// 健康检查
+export async function checkDatabaseHealth(): Promise<{
+  status: 'healthy' | 'unhealthy';
+  type: 'real' | 'mock';
+  latency?: number;
+}> {
+  if (!hasDatabase) {
+    return { status: 'healthy', type: 'mock' };
+  }
+  
+  const start = Date.now();
+  try {
+    await (prisma as PrismaClient).$queryRaw`SELECT 1`;
+    return {
+      status: 'healthy',
+      type: 'real',
+      latency: Date.now() - start,
+    };
+  } catch (error) {
+    return {
+      status: 'unhealthy',
+      type: 'real',
+    };
+  }
 }

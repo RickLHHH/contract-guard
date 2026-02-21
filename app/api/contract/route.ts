@@ -1,203 +1,250 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { parseFile, extractContractInfo } from '@/lib/file-parser';
+import { parseFile, isSupportedFile } from '@/lib/file-parser';
+import { saveFile } from '@/lib/file-storage';
+import { extractContractInfo } from '@/lib/text-utils';
 
-// GET /api/contract - List contracts
+/**
+ * GET /api/contract - 获取合同列表
+ */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const type = searchParams.get('type');
     const riskLevel = searchParams.get('riskLevel');
+    const search = searchParams.get('search');
     const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
     
     const where: Record<string, unknown> = {};
+    
     if (status) where.status = status;
     if (type) where.type = type;
     if (riskLevel) where.riskLevel = riskLevel;
     
-    const contracts = await prisma.contract.findMany({
-      where,
-      include: {
-        creator: {
-          select: { id: true, name: true, avatar: true, role: true },
-        },
-        aiReview: true,
-        _count: {
-          select: { annotations: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
-    });
+    // 搜索功能
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { counterparty: { contains: search, mode: 'insensitive' } },
+        { parsedText: { contains: search, mode: 'insensitive' } },
+      ];
+    }
     
-    const total = await prisma.contract.count({ where });
+    const [contracts, total] = await Promise.all([
+      prisma.contract.findMany({
+        where,
+        include: {
+          creator: {
+            select: { id: true, name: true, avatar: true, role: true },
+          },
+          aiReview: {
+            select: { riskScore: true, overallRisk: true },
+          },
+          _count: {
+            select: { annotations: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.contract.count({ where }),
+    ]);
     
     return NextResponse.json({
       contracts,
-      pagination: { total, limit, offset },
+      pagination: { total, limit, offset, hasMore: offset + limit < total },
     });
   } catch (error) {
-    console.error('List contracts error:', error);
+    console.error('[API] 获取合同列表失败:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch contracts' },
+      { error: '获取合同列表失败', details: error instanceof Error ? error.message : '未知错误' },
       { status: 500 }
     );
   }
 }
 
-// POST /api/contract - Create new contract
+/**
+ * POST /api/contract - 上传新合同
+ */
 export async function POST(request: NextRequest) {
+  console.log('[API] 合同上传开始');
+  
   try {
-    console.log('=== Contract Upload Started ===');
-    
-    // Check if request has form data
+    // 检查 Content-Type
     const contentType = request.headers.get('content-type') || '';
-    console.log('Content-Type:', contentType);
-    
     if (!contentType.includes('multipart/form-data')) {
-      console.error('Invalid content type:', contentType);
       return NextResponse.json(
         { error: 'Invalid content type. Expected multipart/form-data' },
         { status: 400 }
       );
     }
     
+    // 解析表单数据
     let formData: FormData;
     try {
       formData = await request.formData();
-      console.log('FormData parsed successfully');
     } catch (e) {
-      console.error('Failed to parse form data:', e);
+      console.error('[API] 表单解析失败:', e);
       return NextResponse.json(
         { error: 'Failed to parse form data' },
         { status: 400 }
       );
     }
     
+    // 获取表单字段
     const file = formData.get('file') as File | null;
     const title = formData.get('title') as string | null;
     const type = formData.get('type') as string | null;
     const counterparty = formData.get('counterparty') as string | null;
     const amount = formData.get('amount') as string | null;
-    const creatorId = formData.get('creatorId') as string || 'user-1';
+    const isTemplate = formData.get('isTemplate') === 'true';
+    const creatorId = (formData.get('creatorId') as string) || 'user-1';
     
-    console.log('Received fields:', {
-      hasFile: !!file,
-      fileName: file?.name || 'N/A',
-      fileSize: file?.size || 0,
-      title: title || 'N/A',
-      type: type || 'N/A',
-      counterparty: counterparty || 'N/A',
-      amount: amount || 'N/A',
-      creatorId,
-    });
-    
+    // 验证必填字段
     if (!file && !title) {
-      console.error('Validation failed: No file or title provided');
       return NextResponse.json(
-        { error: 'File or title is required' },
+        { error: '请上传文件或输入合同标题' },
         { status: 400 }
       );
     }
     
-    let parsedText = '';
-    let extractedInfo = {
-      title: title || '未命名合同',
-      type: type || 'OTHERS',
-      counterparty: counterparty || '未知主体',
-      amount: amount ? parseFloat(amount) : null,
-    };
-    
-    // Parse uploaded file if exists
-    if (file && file.size > 0) {
-      console.log('Parsing file:', file.name);
-      try {
-        const parsed = await parseFile(file);
-        parsedText = parsed.text;
-        console.log('File parsed successfully, text length:', parsedText.length);
-        
-        // Override with extracted info if not provided
-        const extracted = extractContractInfo(parsedText);
-        if (!title) extractedInfo.title = extracted.title;
-        if (!type) extractedInfo.type = extracted.type;
-        if (!counterparty) extractedInfo.counterparty = extracted.counterparty;
-        if (!amount && extracted.amount) extractedInfo.amount = extracted.amount;
-      } catch (parseError) {
-        console.error('File parsing error:', parseError);
-        // Continue with empty parsedText, don't fail the upload
-        parsedText = '';
-      }
-    } else {
-      console.log('No file provided or file is empty');
+    // 检查文件类型
+    if (file && !isSupportedFile(file.name)) {
+      return NextResponse.json(
+        { error: '不支持的文件类型，请上传 PDF、Word 或 TXT 文件' },
+        { status: 400 }
+      );
     }
     
-    console.log('Creating contract with data:', {
-      title: extractedInfo.title,
-      type: extractedInfo.type,
-      counterparty: extractedInfo.counterparty,
-      amount: extractedInfo.amount,
-      hasParsedText: !!parsedText,
+    console.log('[API] 接收到的文件:', {
+      name: file?.name,
+      size: file?.size,
+      type: file?.type,
     });
     
-    // Create contract
+    let parsedResult: Awaited<ReturnType<typeof parseFile>> | null = null;
+    let storedFile: Awaited<ReturnType<typeof saveFile>> | null = null;
+    
+    // 处理文件上传
+    if (file && file.size > 0) {
+      try {
+        // 读取文件内容
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        // 保存文件到存储
+        storedFile = await saveFile(buffer, file.name, file.type, {
+          directory: 'contracts',
+          uploadedBy: creatorId,
+        });
+        
+        console.log('[API] 文件保存成功:', storedFile.id);
+        
+        // 解析文件内容
+        parsedResult = await parseFile(buffer, file.type, file.name);
+        console.log('[API] 文件解析成功:', {
+          wordCount: parsedResult.metadata.wordCount,
+          pageCount: parsedResult.metadata.pageCount,
+          clauseCount: parsedResult.structure.clauses.length,
+        });
+      } catch (error) {
+        console.error('[API] 文件处理失败:', error);
+        return NextResponse.json(
+          { error: '文件处理失败', details: error instanceof Error ? error.message : '未知错误' },
+          { status: 500 }
+        );
+      }
+    }
+    
+    // 提取或合并信息
+    const extractedInfo = parsedResult 
+      ? extractContractInfo(parsedResult.text)
+      : null;
+    
+    const finalTitle = title || extractedInfo?.title || '未命名合同';
+    const finalType = type || extractedInfo?.type || 'OTHERS';
+    const finalCounterparty = counterparty || extractedInfo?.counterparty || (isTemplate ? '模板待填' : '待补充');
+    const finalAmount = amount 
+      ? parseFloat(amount) 
+      : extractedInfo?.amount || null;
+    
+    // 创建合同记录
     let contract;
     try {
       contract = await prisma.contract.create({
         data: {
-          title: extractedInfo.title,
-          type: extractedInfo.type as any,
+          title: finalTitle,
+          type: finalType as any,
           status: 'AI_REVIEWING',
-          counterparty: extractedInfo.counterparty,
-          amount: extractedInfo.amount,
-          originalFile: file?.name || '',
-          parsedText,
+          counterparty: finalCounterparty,
+          amount: finalAmount,
+          originalFile: storedFile?.id || '',
+          parsedText: parsedResult?.text || '',
           riskLevel: 'D',
           creatorId,
+          // 添加解析元数据
+          metadata: parsedResult ? {
+            pageCount: parsedResult.metadata.pageCount,
+            wordCount: parsedResult.metadata.wordCount,
+            charCount: parsedResult.metadata.charCount,
+            clauseCount: parsedResult.structure.clauses.length,
+            tablesCount: parsedResult.structure.tables.length,
+            isTemplate,
+          } : {},
         },
       });
-      console.log('Contract created successfully:', contract.id);
+      console.log('[API] 合同创建成功:', contract.id);
     } catch (dbError) {
-      console.error('Database error creating contract:', dbError);
+      console.error('[API] 数据库错误:', dbError);
+      // 如果数据库创建失败，删除已保存的文件
+      if (storedFile) {
+        try {
+          const { deleteFile } = await import('@/lib/file-storage');
+          await deleteFile(storedFile.id);
+        } catch {
+          // 忽略删除错误
+        }
+      }
       return NextResponse.json(
-        { error: 'Database error: Failed to create contract' },
+        { error: '创建合同失败', details: dbError instanceof Error ? dbError.message : '数据库错误' },
         { status: 500 }
       );
     }
     
-    // Create initial version
+    // 创建初始版本记录
     try {
       await prisma.contractVersion.create({
         data: {
           contractId: contract.id,
           versionNumber: 1,
-          fileUrl: file?.name || '',
+          fileUrl: storedFile?.id || '',
+          changes: '初始版本',
           createdBy: creatorId,
         },
       });
-      console.log('Contract version created successfully');
     } catch (versionError) {
-      console.error('Error creating contract version:', versionError);
-      // Don't fail the request if version creation fails
+      console.error('[API] 版本记录创建失败:', versionError);
+      // 非致命错误，继续
     }
     
-    console.log('=== Contract Upload Completed ===');
+    console.log('[API] 合同上传完成:', contract.id);
     
     return NextResponse.json({
       success: true,
       contract: {
         ...contract,
-        parsedText, // Include parsedText for analysis step
+        parsedText: parsedResult?.text,
+        structure: parsedResult?.structure,
       },
     });
     
   } catch (error) {
-    console.error('=== Create contract error ===', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[API] 合同上传失败:', error);
     return NextResponse.json(
-      { error: 'Failed to create contract', details: errorMessage },
+      { error: '上传失败', details: error instanceof Error ? error.message : '未知错误' },
       { status: 500 }
     );
   }

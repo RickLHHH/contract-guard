@@ -43,6 +43,7 @@ model Contract {
   
   originalFile  String           // 原始文件URL
   parsedText    String?          @db.Text  // 解析后的文本
+  metadata      Json?            // 解析元数据（页数、字数等）
   
   creatorId     String
   creator       User             @relation("ContractCreator", fields: [creatorId], references: [id])
