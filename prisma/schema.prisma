@@ -1,0 +1,269 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 用户与组织
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String
+  role          UserRole  // BUSINESS_USER, LEGAL_SPECIALIST, LEGAL_DIRECTOR, ADMIN
+  department    String?
+  avatar        String?
+  createdAt     DateTime  @default(now())
+  
+  contracts     Contract[]      @relation("ContractCreator")
+  annotations   Annotation[]    @relation("AnnotationAuthor")
+  approvals     Approval[]      @relation("ApprovalHandler")
+}
+
+enum UserRole {
+  BUSINESS_USER
+  LEGAL_SPECIALIST
+  LEGAL_DIRECTOR
+  FINANCE
+  CEO
+  ADMIN
+}
+
+// 合同主表
+model Contract {
+  id            String           @id @default(uuid())
+  title         String
+  type          ContractType     // SALES, PROCUREMENT, EMPLOYMENT, NDA, etc.
+  status        ContractStatus   // DRAFT, AI_REVIEWING, LEGAL_REVIEW, APPROVING, APPROVED, REJECTED
+  amount        Decimal?         @db.Decimal(15, 2)
+  counterparty  String           // 对方主体
+  riskLevel     RiskLevel        // A, B, C, D
+  
+  originalFile  String           // 原始文件URL
+  parsedText    String?          @db.Text  // 解析后的文本
+  
+  creatorId     String
+  creator       User             @relation("ContractCreator", fields: [creatorId], references: [id])
+  
+  versions      ContractVersion[]
+  annotations   Annotation[]
+  approvals     Approval[]
+  workflow      WorkflowExecution?
+  aiReview      AIReview?
+  
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  completedAt   DateTime?
+}
+
+enum ContractType {
+  SALES
+  PROCUREMENT
+  EMPLOYMENT
+  NDA
+  SERVICE
+  LEASE
+  OTHERS
+}
+
+enum ContractStatus {
+  DRAFT
+  AI_REVIEWING
+  LEGAL_REVIEW
+  APPROVING
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum RiskLevel {
+  A  // 高风险
+  B  // 中风险
+  C  // 低风险
+  D  // 极低风险
+}
+
+// 合同版本
+model ContractVersion {
+  id            String    @id @default(uuid())
+  contractId    String
+  contract      Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  fileUrl       String
+  changes       String?   @db.Text  // 变更摘要
+  createdBy     String
+  createdAt     DateTime  @default(now())
+  
+  @@unique([contractId, versionNumber])
+}
+
+// AI审查结果
+model AIReview {
+  id            String    @id @default(uuid())
+  contractId    String    @unique
+  contract      Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  
+  overallRisk   String    // high/medium/low
+  riskScore     Int       // 0-100
+  keyRisks      Json      // 风险点数组
+  missingClauses Json?    // 缺失条款
+  thinking      String?   @db.Text  // AI思考过程
+  
+  createdAt     DateTime  @default(now())
+}
+
+// 批注
+model Annotation {
+  id            String            @id @default(uuid())
+  contractId    String
+  contract      Contract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  
+  page          Int
+  startOffset   Int
+  endOffset     Int
+  selectedText  String?           // 选中的原文
+  
+  type          AnnotationType    // AI_SUGGESTION, MANUAL_COMMENT, REVISION
+  content       String            @db.Text
+  status        AnnotationStatus  // OPEN, RESOLVED, REJECTED
+  visibility    Visibility        // INTERNAL, EXTERNAL
+  
+  authorId      String
+  author        User              @relation("AnnotationAuthor", fields: [authorId], references: [id])
+  replies       Reply[]
+  
+  createdAt     DateTime          @default(now())
+  resolvedAt    DateTime?
+}
+
+enum AnnotationType {
+  AI_SUGGESTION
+  MANUAL_COMMENT
+  REVISION
+}
+
+enum AnnotationStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum Visibility {
+  INTERNAL    // 仅法务可见
+  EXTERNAL    // 业务也可见
+}
+
+// 回复
+model Reply {
+  id            String       @id @default(uuid())
+  annotationId  String
+  annotation    Annotation   @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  authorId      String
+  content       String
+  createdAt     DateTime     @default(now())
+}
+
+// 审批流执行实例
+model WorkflowExecution {
+  id            String           @id @default(uuid())
+  contractId    String           @unique
+  contract      Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  templateId    String           // 使用的模板ID
+  
+  currentNodeId String           // 当前所在节点
+  status        ExecutionStatus  // RUNNING, COMPLETED, REJECTED
+  
+  nodes         WorkflowNode[]
+  history       Approval[]
+  
+  startedAt     DateTime         @default(now())
+  completedAt   DateTime?
+}
+
+enum ExecutionStatus {
+  RUNNING
+  COMPLETED
+  REJECTED
+  TIMEOUT
+}
+
+// 审批节点配置
+model WorkflowNode {
+  id            String           @id @default(uuid())
+  executionId   String
+  execution     WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  nodeId        String           // 模板中的节点ID
+  type          NodeType
+  status        NodeStatus       // PENDING, IN_PROGRESS, COMPLETED, SKIPPED
+  
+  assignedTo    String?          // 分配给具体用户ID
+  completedBy   String?          // 实际处理人ID
+  result        ApprovalResult?  // APPROVED, REJECTED
+  comment       String?
+  
+  dueDate       DateTime?        // 截止时间（SLA）
+  completedAt   DateTime?
+  
+  @@unique([executionId, nodeId])
+}
+
+enum NodeType {
+  AI_REVIEW
+  LEGAL_REVIEW
+  FINANCE_REVIEW
+  MANAGEMENT_APPROVAL
+  PARALLEL_APPROVAL
+  CONDITION
+}
+
+enum NodeStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+// 审批记录
+model Approval {
+  id            String           @id @default(uuid())
+  contractId    String
+  contract      Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  executionId   String
+  execution     WorkflowExecution @relation(fields: [executionId], references: [id])
+  
+  handlerId     String
+  handler       User             @relation("ApprovalHandler", fields: [handlerId], references: [id])
+  
+  action        ApprovalResult
+  comment       String?
+  createdAt     DateTime         @default(now())
+}
+
+enum ApprovalResult {
+  APPROVED
+  REJECTED
+  DELEGATED
+  RETURNED
+}
+
+// 知识库文档
+model KnowledgeDoc {
+  id            String    @id @default(uuid())
+  title         String
+  type          DocType   // TEMPLATE, POLICY, PRECEDENT, CLAUSE_LIBRARY
+  content       String    @db.Text
+  vectorId      String?   // 向量库中的ID
+  metadata      Json?     // 附加信息（如适用部门、生效日期）
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+enum DocType {
+  TEMPLATE      // 合同模板
+  POLICY        // 公司制度
+  PRECEDENT     // 历史案例
+  CLAUSE_LIBRARY // 条款库
+}
