@@ -245,8 +245,14 @@ export default function ContractReviewPage() {
               {getStatusBadge(contract.status)}
             </div>
             <p className="text-xs text-muted-foreground">
-              {CONTRACT_TYPE_LABELS[contract.type]} · {contract.counterparty}
-              {contract.amount && ` · ¥${contract.amount.toLocaleString()}`}
+              {CONTRACT_TYPE_LABELS[contract.type]}
+              {contract.counterparty && contract.counterparty !== "模板待填" && contract.counterparty !== "待补充" && (
+                <> · {contract.counterparty}</>
+              )}
+              {contract.amount ? ` · ¥${contract.amount.toLocaleString()}` : ""}
+              {(contract.counterparty === "模板待填" || contract.counterparty === "待补充") && (
+                <Badge variant="outline" className="ml-2 text-xs">模板</Badge>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">

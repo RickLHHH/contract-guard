@@ -264,7 +264,15 @@ export default function ContractsPage() {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>{contract.counterparty}</TableCell>
+                    <TableCell>
+                      {contract.counterparty === "模板待填" || contract.counterparty === "待补充" ? (
+                        <span className="text-muted-foreground italic">
+                          {contract.counterparty}
+                        </span>
+                      ) : (
+                        contract.counterparty
+                      )}
+                    </TableCell>
                     <TableCell>
                       {contract.amount
                         ? formatCurrency(contract.amount)

@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
-import { FileText, Upload, X, Loader2 } from "lucide-react";
+import { FileText, Upload, X, Loader2, FileQuestion, FileCheck, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { CONTRACT_TYPE_LABELS } from "@/constants/rules";
 
@@ -40,6 +42,7 @@ export function UploadContractDialog({
   const [type, setType] = useState("");
   const [counterparty, setCounterparty] = useState("");
   const [amount, setAmount] = useState("");
+  const [isTemplate, setIsTemplate] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
@@ -61,6 +64,7 @@ export function UploadContractDialog({
       'application/pdf': ['.pdf'],
       'application/msword': ['.doc'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'text/plain': ['.txt'],
     },
     maxFiles: 1,
   });
@@ -71,6 +75,7 @@ export function UploadContractDialog({
     setType("");
     setCounterparty("");
     setAmount("");
+    setIsTemplate(false);
     setProgress(0);
     setUploading(false);
     setAnalyzing(false);
@@ -82,6 +87,16 @@ export function UploadContractDialog({
       return;
     }
 
+    // 如果不是模板，且没有填写对方主体，给出提示
+    if (!isTemplate && !counterparty.trim()) {
+      const confirmed = window.confirm(
+        "您没有选择"模板模式"，且未填写对方主体。\n\n" +
+        "如果是正式合同，建议填写对方公司名称以便归档。\n\n" +
+        "点击【确定】继续上传，点击【取消】返回填写。"
+      );
+      if (!confirmed) return;
+    }
+
     setUploading(true);
 
     try {
@@ -90,7 +105,8 @@ export function UploadContractDialog({
       if (file) formData.append("file", file);
       formData.append("title", title);
       formData.append("type", type || "OTHERS");
-      formData.append("counterparty", counterparty || "未知主体");
+      formData.append("counterparty", counterparty.trim() || (isTemplate ? "模板待填" : "待补充"));
+      formData.append("isTemplate", String(isTemplate));
       if (amount) formData.append("amount", amount);
 
       const uploadResponse = await fetch("/api/contract", {
@@ -129,7 +145,10 @@ export function UploadContractDialog({
         setProgress(100);
       }
 
-      toast.success("合同上传并分析成功！");
+      toast.success(isTemplate 
+        ? "合同模板上传成功！可以基于此模板快速生成正式合同。" 
+        : "合同上传并分析成功！"
+      );
       resetForm();
       onOpenChange(false);
       onSuccess?.();
@@ -148,7 +167,7 @@ export function UploadContractDialog({
         <DialogHeader>
           <DialogTitle>上传合同</DialogTitle>
           <DialogDescription>
-            支持 PDF、Word 格式，AI 将自动分析合同风险
+            支持 PDF、Word、TXT 格式，AI 将自动分析合同风险
           </DialogDescription>
         </DialogHeader>
 
@@ -192,21 +211,54 @@ export function UploadContractDialog({
                   {isDragActive ? "释放文件以上传" : "拖拽文件到此处或点击上传"}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  支持 PDF、Word 格式，最大 20MB
+                  支持 PDF、Word、TXT 格式，最大 20MB
                 </p>
               </>
             )}
           </div>
 
+          {/* Template Mode Toggle */}
+          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border">
+            <div className="flex items-center gap-3">
+              {isTemplate ? (
+                <FileQuestion className="w-5 h-5 text-blue-500" />
+              ) : (
+                <FileCheck className="w-5 h-5 text-green-500" />
+              )}
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">
+                    {isTemplate ? "模板模式" : "正式合同"}
+                  </span>
+                  {isTemplate && (
+                    <Badge variant="secondary" className="text-xs">模板</Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {isTemplate 
+                    ? "用于审查标准合同模板，对方信息和金额可暂不填写" 
+                    : "用于审查具体合同，建议填写完整信息便于归档"}
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={isTemplate}
+              onCheckedChange={setIsTemplate}
+            />
+          </div>
+
           {/* Contract Info Form */}
           <div className="space-y-4">
             <div>
-              <Label htmlFor="title">合同标题</Label>
+              <Label htmlFor="title">
+                合同标题
+                <span className="text-red-500 ml-1">*</span>
+              </Label>
               <Input
                 id="title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="输入合同标题"
+                placeholder={isTemplate ? "如：采购合同模板 v1.0" : "输入合同标题"}
               />
             </div>
 
@@ -227,23 +279,42 @@ export function UploadContractDialog({
             </div>
 
             <div>
-              <Label htmlFor="counterparty">对方主体</Label>
+              <Label htmlFor="counterparty" className="flex items-center gap-2">
+                对方主体
+                {!isTemplate && <span className="text-red-500">*</span>}
+                {isTemplate && (
+                  <Badge variant="outline" className="text-xs font-normal">可选</Badge>
+                )}
+              </Label>
               <Input
                 id="counterparty"
                 value={counterparty}
                 onChange={(e) => setCounterparty(e.target.value)}
-                placeholder="输入对方公司名称"
+                placeholder={isTemplate ? "模板阶段可不填写" : "输入对方公司名称"}
+                className={isTemplate ? "bg-slate-50" : ""}
               />
+              {isTemplate && (
+                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <Info className="w-3 h-3" />
+                  模板模式下此字段可为空，生成正式合同时再填写
+                </p>
+              )}
             </div>
 
             <div>
-              <Label htmlFor="amount">合同金额（元）</Label>
+              <Label htmlFor="amount" className="flex items-center gap-2">
+                合同金额（元）
+                {isTemplate && (
+                  <Badge variant="outline" className="text-xs font-normal">可选</Badge>
+                )}
+              </Label>
               <Input
                 id="amount"
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="输入合同金额"
+                placeholder={isTemplate ? "模板阶段可不填写" : "输入合同金额"}
+                className={isTemplate ? "bg-slate-50" : ""}
               />
             </div>
           </div>
@@ -283,7 +354,7 @@ export function UploadContractDialog({
                 处理中...
               </>
             ) : (
-              "上传并分析"
+              isTemplate ? "上传模板并分析" : "上传并分析"
             )}
           </Button>
         </div>
