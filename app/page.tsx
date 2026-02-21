@@ -151,23 +151,43 @@ export default function Dashboard() {
               <FileText className="w-4 h-4" />
               合同列表
             </Button>
-            <Button variant="ghost" className="w-full justify-start gap-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push("/pending")}
+            >
               <Clock className="w-4 h-4" />
               待审合同
             </Button>
-            <Button variant="ghost" className="w-full justify-start gap-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push("/approved")}
+            >
               <CheckCircle className="w-4 h-4" />
               已审合同
             </Button>
-            <Button variant="ghost" className="w-full justify-start gap-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push("/knowledge")}
+            >
               <BookOpen className="w-4 h-4" />
               知识库
             </Button>
-            <Button variant="ghost" className="w-full justify-start gap-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push("/team")}
+            >
               <Users className="w-4 h-4" />
               团队管理
             </Button>
-            <Button variant="ghost" className="w-full justify-start gap-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push("/settings")}
+            >
               <Settings className="w-4 h-4" />
               系统设置
             </Button>

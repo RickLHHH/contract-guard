@@ -302,7 +302,7 @@ export default function ContractReviewPage() {
       {/* Three-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Document Preview */}
-        <div className="w-5/12 border-r bg-white flex flex-col">
+        <div className="w-5/12 border-r bg-white flex flex-col h-full">
           <div className="flex items-center justify-between p-3 border-b">
             <span className="text-sm font-medium">合同正文</span>
             <div className="flex items-center gap-2">
@@ -311,7 +311,7 @@ export default function ContractReviewPage() {
               </Button>
             </div>
           </div>
-          <ScrollArea className="flex-1 p-6">
+          <div className="flex-1 overflow-auto p-6">
             <div className="prose prose-slate max-w-none">
               {contract.parsedText ? (
                 <div className="whitespace-pre-wrap font-mono text-sm leading-relaxed">
@@ -325,7 +325,7 @@ export default function ContractReviewPage() {
                           : "hover:bg-slate-50"
                       )}
                     >
-                      {line}
+                      {line || " "}
                     </div>
                   ))}
                 </div>
@@ -336,7 +336,7 @@ export default function ContractReviewPage() {
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
         </div>
 
         {/* Center: Annotations */}
