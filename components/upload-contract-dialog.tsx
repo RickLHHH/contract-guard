@@ -90,9 +90,9 @@ export function UploadContractDialog({
     // 如果不是模板，且没有填写对方主体，给出提示
     if (!isTemplate && !counterparty.trim()) {
       const confirmed = window.confirm(
-        "您没有选择"模板模式"，且未填写对方主体。\n\n" +
-        "如果是正式合同，建议填写对方公司名称以便归档。\n\n" +
-        "点击【确定】继续上传，点击【取消】返回填写。"
+        '您没有选择【模板模式】，且未填写对方主体。\n\n' +
+        '如果是正式合同，建议填写对方公司名称以便归档。\n\n' +
+        '点击【确定】继续上传，点击【取消】返回填写。'
       );
       if (!confirmed) return;
     }
