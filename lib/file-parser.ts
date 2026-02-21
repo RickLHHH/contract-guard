@@ -3,8 +3,8 @@
  * 支持 PDF、Word(.doc/.docx)、TXT、图片(OCR) 格式
  */
 
-import pdf from 'pdf-parse';
-import mammoth from 'mammoth';
+import * as pdfParse from 'pdf-parse';
+import * as mammoth from 'mammoth';
 import { cleanText, extractContractInfo } from './text-utils';
 
 // 支持的文件类型
@@ -97,7 +97,7 @@ export async function parseFile(buffer: Buffer, mimeType: string, filename: stri
  */
 async function parsePDF(buffer: Buffer): Promise<ParseResult> {
   try {
-    const pdfData = await pdf(buffer);
+    const pdfData = await (pdfParse as any)(buffer);
     const text = cleanText(pdfData.text);
     
     // 提取段落（按空行分割）
@@ -134,7 +134,7 @@ async function parsePDF(buffer: Buffer): Promise<ParseResult> {
 async function parseWord(buffer: Buffer): Promise<ParseResult> {
   try {
     // 使用 mammoth 提取纯文本
-    const result = await mammoth.extractRawText({ buffer });
+    const result = await (mammoth as any).extractRawText({ buffer });
     const text = cleanText(result.value);
     
     // 提取段落
@@ -144,7 +144,7 @@ async function parseWord(buffer: Buffer): Promise<ParseResult> {
     const clauses = extractClauses(text);
     
     // 尝试提取表格（使用 HTML 转换）
-    const htmlResult = await mammoth.convertToHtml({ buffer });
+    const htmlResult = await (mammoth as any).convertToHtml({ buffer });
     const tables = extractTablesFromHtml(htmlResult.value);
     
     return {
