@@ -1,23 +1,37 @@
 import { AIReview, RiskItem } from '@/types';
 
-// API Configuration
-const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/v1';
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-
-// Qwen API Configuration (DashScope)
-const QWEN_API_URL = process.env.QWEN_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const QWEN_API_KEY = process.env.QWEN_API_KEY || '';
+// API Configuration - 使用函数获取以支持运行时环境变量
+const getConfig = () => ({
+  DEEPSEEK_API_URL: process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/v1',
+  DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || '',
+  QWEN_API_URL: process.env.QWEN_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  QWEN_API_KEY: process.env.QWEN_API_KEY || '',
+  AI_PROVIDER: process.env.AI_PROVIDER || '',
+});
 
 // Determine which AI provider to use
-const AI_PROVIDER = process.env.AI_PROVIDER || (QWEN_API_KEY ? 'qwen' : DEEPSEEK_API_KEY ? 'deepseek' : 'mock');
+function getAIProvider(): 'qwen' | 'deepseek' | 'mock' {
+  const config = getConfig();
+  const provider = config.AI_PROVIDER;
+  
+  if (provider === 'qwen' && config.QWEN_API_KEY) return 'qwen';
+  if (provider === 'deepseek' && config.DEEPSEEK_API_KEY) return 'deepseek';
+  if (config.QWEN_API_KEY) return 'qwen';
+  if (config.DEEPSEEK_API_KEY) return 'deepseek';
+  return 'mock';
+}
 
-// Log configuration on module load
-console.log('=== AI Service Configuration ===');
-console.log('AI_PROVIDER:', AI_PROVIDER);
-console.log('QWEN_API_KEY exists:', !!QWEN_API_KEY);
-console.log('QWEN_API_KEY prefix:', QWEN_API_KEY ? QWEN_API_KEY.substring(0, 10) + '...' : 'N/A');
-console.log('DEEPSEEK_API_KEY exists:', !!DEEPSEEK_API_KEY);
-console.log('================================');
+// Log configuration (called at runtime)
+function logConfig() {
+  const config = getConfig();
+  const provider = getAIProvider();
+  console.log('=== AI Service Configuration ===');
+  console.log('AI_PROVIDER env:', config.AI_PROVIDER || '(not set)');
+  console.log('Selected provider:', provider);
+  console.log('QWEN_API_KEY exists:', !!config.QWEN_API_KEY);
+  console.log('DEEPSEEK_API_KEY exists:', !!config.DEEPSEEK_API_KEY);
+  console.log('================================');
+}
 
 // Enhanced System Prompt for better contract review
 const SYSTEM_PROMPT = `你是一名资深企业法务顾问，拥有15年合同审查经验。你的任务是专业审查合同并输出结构化分析结果。
@@ -223,11 +237,12 @@ export function generateMockAIReview(contractText: string): AIReview {
 
 // Qwen API call
 export async function analyzeContractWithQwen(contractText: string): Promise<AIReview> {
+  const config = getConfig();
   console.log('=== Qwen API Analysis Started ===');
-  console.log('API Key configured:', QWEN_API_KEY ? 'Yes' : 'No');
+  console.log('API Key configured:', config.QWEN_API_KEY ? 'Yes' : 'No');
   console.log('Contract text length:', contractText?.length || 0);
   
-  if (!QWEN_API_KEY) {
+  if (!config.QWEN_API_KEY) {
     console.log('No Qwen API key, falling back to mock');
     return generateMockAIReview(contractText);
   }
@@ -242,7 +257,7 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
     const prompt = REVIEW_PROMPT_TEMPLATE.replace('{contractText}', processedText);
     
     console.log('Calling Qwen API...');
-    console.log('API URL:', QWEN_API_URL);
+    console.log('API URL:', config.QWEN_API_URL);
     
     const requestBody = {
       model: 'qwen-plus',
@@ -254,11 +269,11 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
       max_tokens: 3000,
     };
     
-    const response = await fetch(`${QWEN_API_URL}/chat/completions`, {
+    const response = await fetch(`${config.QWEN_API_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${QWEN_API_KEY}`,
+        'Authorization': `Bearer ${config.QWEN_API_KEY}`,
       },
       body: JSON.stringify(requestBody),
     });
@@ -355,7 +370,8 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
 
 // DeepSeek API call
 export async function analyzeContractWithDeepSeek(contractText: string): Promise<AIReview> {
-  if (!DEEPSEEK_API_KEY) {
+  const config = getConfig();
+  if (!config.DEEPSEEK_API_KEY) {
     return generateMockAIReview(contractText);
   }
   
@@ -367,11 +383,11 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
     
     const prompt = REVIEW_PROMPT_TEMPLATE.replace('{contractText}', processedText);
     
-    const response = await fetch(`${DEEPSEEK_API_URL}/chat/completions`, {
+    const response = await fetch(`${config.DEEPSEEK_API_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+        'Authorization': `Bearer ${config.DEEPSEEK_API_KEY}`,
       },
       body: JSON.stringify({
         model: 'deepseek-chat',
@@ -424,9 +440,11 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
 
 // Unified analysis function
 export async function analyzeContract(contractText: string): Promise<AIReview> {
-  console.log(`=== analyzeContract called, provider: ${AI_PROVIDER} ===`);
+  logConfig();
+  const provider = getAIProvider();
+  console.log(`=== analyzeContract called, provider: ${provider} ===`);
   
-  switch (AI_PROVIDER) {
+  switch (provider) {
     case 'qwen':
       return analyzeContractWithQwen(contractText);
     case 'deepseek':
@@ -439,11 +457,12 @@ export async function analyzeContract(contractText: string): Promise<AIReview> {
 
 // Export for debugging
 export function getAIConfig() {
+  const config = getConfig();
   return {
-    provider: AI_PROVIDER,
-    hasQwenKey: !!QWEN_API_KEY,
-    hasDeepSeekKey: !!DEEPSEEK_API_KEY,
-    qwenUrl: QWEN_API_URL,
-    deepseekUrl: DEEPSEEK_API_URL,
+    provider: getAIProvider(),
+    hasQwenKey: !!config.QWEN_API_KEY,
+    hasDeepSeekKey: !!config.DEEPSEEK_API_KEY,
+    qwenUrl: config.QWEN_API_URL,
+    deepseekUrl: config.DEEPSEEK_API_URL,
   };
 }

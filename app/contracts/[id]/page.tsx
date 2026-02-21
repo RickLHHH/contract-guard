@@ -495,21 +495,23 @@ export default function ContractReviewPage() {
           </div>
 
           {/* 文档内容 */}
-          <ScrollArea className="flex-1">
-            <div className="p-6 max-w-3xl mx-auto">
-              {contract.parsedText ? (
-                <div className="prose prose-slate max-w-none">
-                  {renderContractContent()}
-                </div>
-              ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  <FileText className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>暂无合同文本</p>
-                  <p className="text-sm mt-2">该合同可能未上传文件或解析失败</p>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
+              <div className="p-6 max-w-3xl mx-auto min-h-0">
+                {contract.parsedText ? (
+                  <div className="prose prose-slate max-w-none">
+                    {renderContractContent()}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <FileText className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>暂无合同文本</p>
+                    <p className="text-sm mt-2">该合同可能未上传文件或解析失败</p>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
 
           {/* 选中文本提示 */}
           {textSelection && (

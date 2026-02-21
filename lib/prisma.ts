@@ -13,6 +13,8 @@ const createMockPrisma = (): PrismaClient => {
   
   // 内存存储
   const contracts: Contract[] = [];
+  const aiReviews: any[] = [];
+  const annotations: any[] = [];
   const users: User[] = [
     {
       id: 'user-1',
@@ -100,17 +102,31 @@ const createMockPrisma = (): PrismaClient => {
         
         return result;
       },
-      findUnique: async ({ where }: { where: { id: string } }) => {
+      findUnique: async ({ where, include }: { where: { id: string }, include?: any }) => {
         const contract = contracts.find(c => c.id === where.id);
-        if (contract) {
-          return {
-            ...contract,
-            creator: users.find(u => u.id === contract.creatorId),
-            aiReview: null,
-            annotations: [],
-          };
+        if (!contract) return null;
+        
+        // 基础返回对象
+        const result: any = { ...contract };
+        
+        // 处理 include 关系
+        if (include) {
+          if (include.creator || include.creator === true) {
+            result.creator = users.find(u => u.id === contract.creatorId);
+          }
+          if (include.aiReview || include.aiReview === true) {
+            result.aiReview = aiReviews.find(r => r.contractId === contract.id) || null;
+          }
+          if (include.annotations || include.annotations === true) {
+            result.annotations = annotations.filter(a => a.contractId === contract.id)
+              .map(a => ({
+                ...a,
+                author: users.find(u => u.id === a.authorId),
+              }));
+          }
         }
-        return null;
+        
+        return result;
       },
       findFirst: async () => contracts[0] || null,
       count: async (args?: any) => {
@@ -175,20 +191,38 @@ const createMockPrisma = (): PrismaClient => {
       findMany: async () => [],
     },
     aIReview: {
-      create: async ({ data }: { data: any }) => ({
-        id: generateId(),
-        ...data,
-        createdAt: new Date(),
-      }),
-      findUnique: async () => null,
+      create: async ({ data }: { data: any }) => {
+        const review = {
+          id: generateId(),
+          ...data,
+          createdAt: new Date(),
+        };
+        aiReviews.push(review);
+        return review;
+      },
+      findUnique: async ({ where }: { where: { contractId?: string } }) => {
+        if (where.contractId) {
+          return aiReviews.find(r => r.contractId === where.contractId) || null;
+        }
+        return null;
+      },
     },
     annotation: {
-      create: async ({ data }: { data: any }) => ({
-        id: generateId(),
-        ...data,
-        createdAt: new Date(),
-      }),
-      findMany: async () => [],
+      create: async ({ data }: { data: any }) => {
+        const annotation = {
+          id: generateId(),
+          ...data,
+          createdAt: new Date(),
+        };
+        annotations.push(annotation);
+        return annotation;
+      },
+      findMany: async ({ where }: { where?: { contractId?: string } }) => {
+        if (where?.contractId) {
+          return annotations.filter(a => a.contractId === where.contractId);
+        }
+        return annotations;
+      },
     },
     $queryRaw: async () => [{ 1: 1 }],
     $disconnect: async () => {},
