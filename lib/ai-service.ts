@@ -9,52 +9,77 @@ const QWEN_API_URL = process.env.QWEN_API_URL || 'https://dashscope.aliyuncs.com
 const QWEN_API_KEY = process.env.QWEN_API_KEY || '';
 
 // Determine which AI provider to use
-// Priority: 1. Explicit AI_PROVIDER setting, 2. Qwen if key available, 3. DeepSeek if key available, 4. Mock
 const AI_PROVIDER = process.env.AI_PROVIDER || (QWEN_API_KEY ? 'qwen' : DEEPSEEK_API_KEY ? 'deepseek' : 'mock');
 
-// Review Prompt for AI
-const REVIEW_PROMPT = `你是一名资深企业法务顾问，拥有10年合同审查经验。请对以下合同进行专业审查：
+// Log configuration on module load
+console.log('=== AI Service Configuration ===');
+console.log('AI_PROVIDER:', AI_PROVIDER);
+console.log('QWEN_API_KEY exists:', !!QWEN_API_KEY);
+console.log('QWEN_API_KEY prefix:', QWEN_API_KEY ? QWEN_API_KEY.substring(0, 10) + '...' : 'N/A');
+console.log('DEEPSEEK_API_KEY exists:', !!DEEPSEEK_API_KEY);
+console.log('================================');
 
-【审查重点】
-1. 权利义务对等性（是否存在明显不对等条款）
-2. 风险分配合理性（不可抗力、情势变更条款）
-3. 退出机制完整性（解除条件、违约责任）
-4. 知识产权归属（尤其涉及技术/创意类合同）
-5. 保密与竞业限制（范围、期限、补偿）
-6. 付款与交付条款（账期、验收标准）
-7. 争议解决条款（管辖、适用法律）
+// Enhanced System Prompt for better contract review
+const SYSTEM_PROMPT = `你是一名资深企业法务顾问，拥有15年合同审查经验。你的任务是专业审查合同并输出结构化分析结果。
 
-【输出格式要求】
-必须返回严格JSON格式，不要包含任何markdown代码块标记，不要添加任何额外说明文字，只返回纯JSON：
+【审查标准】
+1. 法律合规性：检查是否符合《民法典》《合同法》等相关法规
+2. 商业合理性：付款条款、交付条款、违约责任是否公平
+3. 风险可控性：识别潜在法律风险和商业风险
+4. 条款完整性：检查必备条款是否齐全
+
+【输出要求】
+- 必须返回纯JSON格式，不要任何markdown标记
+- 不要添加任何解释性文字，只返回JSON
+- JSON必须能被标准JSON解析器解析
+- 风险点要具体，引用合同原文
+
+【风险等级定义】
+- high（高）：可能导致重大经济损失或法律责任
+- medium（中）：存在一定风险，建议修改
+- low（低）：轻微瑕疵，可接受
+
+【风险类型】
+- legal：法律风险
+- commercial：商业风险
+- operational：操作风险
+- ip：知识产权风险`;
+
+// Review Prompt Template
+const REVIEW_PROMPT_TEMPLATE = `请审查以下合同文本，并按照指定格式返回分析结果。
+
+【合同文本】
+{contractText}
+
+【输出格式】
 {
   "overallRisk": "high/medium/low",
-  "riskScore": 78,
+  "riskScore": 75,
   "keyRisks": [
     {
-      "clause": "条款原文摘要（50字以内）",
+      "clause": "问题条款原文（30字以内）",
       "location": "第X条",
-      "riskType": "legal/commercial/operational",
+      "riskType": "legal/commercial/operational/ip",
       "severity": "high/medium/low",
-      "explanation": "风险说明（100字以内）",
-      "suggestion": "修改建议（100字以内）",
-      "category": "风险类别"
+      "explanation": "风险说明（80字以内）",
+      "suggestion": "修改建议（80字以内）",
+      "category": "风险类别如：法律风险/财务风险/知识产权"
     }
   ],
-  "missingClauses": ["建议补充的条款1", "建议补充的条款2"],
-  "thinking": "分析思考过程（200字以内）"
+  "missingClauses": ["缺失条款1", "缺失条款2"],
+  "thinking": "整体分析思路（150字以内）"
 }
 
-【重要】
-- 如果合同内容较短，返回 fewer risks
-- 如果没有明显风险，riskScore 可以给 85-95 分
-- 必须返回合法的 JSON 格式
+【要求】
+1. 仔细分析每一条款
+2. 找出具体的风险点
+3. 给出可操作的修改建议
+4. 如果没有明显风险，riskScore可以给85-95分
+5. 必须确保返回的是合法JSON格式`;
 
-合同文本：
-`;
-
-// Enhanced Mock AI Review with more comprehensive analysis
+// Mock AI Review for demo purposes
 export function generateMockAIReview(contractText: string): AIReview {
-  console.log('Generating mock AI review for contract:', contractText.substring(0, 100));
+  console.log('Generating mock AI review, text length:', contractText?.length || 0);
   
   if (!contractText || contractText.length < 10) {
     return {
@@ -73,7 +98,7 @@ export function generateMockAIReview(contractText: string): AIReview {
         category: '操作建议',
       }],
       missingClauses: ['请上传完整合同文本'],
-      thinking: '由于合同文本内容较少，只能进行基础分析。建议上传完整合同以获得全面的风险评估。',
+      thinking: '由于合同文本内容较少，只能进行基础分析。',
       createdAt: new Date().toISOString(),
     };
   }
@@ -81,162 +106,108 @@ export function generateMockAIReview(contractText: string): AIReview {
   // Extract key sections for analysis
   const hasPaymentTerms = /付款|支付|账期|预付款|尾款/i.test(contractText);
   const hasJurisdiction = /管辖|仲裁|争议解决|法院|诉讼/i.test(contractText);
-  const hasTermination = /解除|终止|违约|不可抗力/i.test(contractText);
   const hasConfidentiality = /保密|保密义务|商业秘密/i.test(contractText);
   const hasIP = /知识产权|专利|商标|著作权|技术成果/i.test(contractText);
-  const hasWarranty = /质保|保修|质量保证|售后服务/i.test(contractText);
-  const hasLiability = /责任限制|赔偿限额|免责/i.test(contractText);
+  const hasTermination = /解除|终止|违约|不可抗力/i.test(contractText);
   
   const risks: RiskItem[] = [];
   
-  // Analyze payment terms
+  // Payment terms analysis
   if (hasPaymentTerms) {
     const longPaymentMatch = contractText.match(/付款.*?(\d+).*?(天|日|工作日)/i);
-    const prepayMatch = contractText.match(/预付款.*?(\d+)%|首付.*?(\d+)%/i);
-    
     if (longPaymentMatch && parseInt(longPaymentMatch[1]) > 30) {
       risks.push({
-        id: `ai-risk-${risks.length + 1}`,
+        id: `risk-${risks.length + 1}`,
         clause: longPaymentMatch[0],
         location: '付款条款',
         riskType: 'commercial',
         severity: 'medium',
-        explanation: `付款账期为${longPaymentMatch[1]}天，较长，可能占用公司资金。`,
-        suggestion: '建议争取预付款或缩短账期至15-30天，或约定分期付款。',
-        category: '财务风险',
-      });
-    }
-    
-    if (!prepayMatch) {
-      risks.push({
-        id: `ai-risk-${risks.length + 1}`,
-        clause: '付款条款',
-        location: '付款方式',
-        riskType: 'commercial',
-        severity: 'low',
-        explanation: '未约定预付款比例，可能增加资金风险。',
-        suggestion: '建议约定30%预付款，验收合格后支付尾款。',
+        explanation: `付款账期${longPaymentMatch[1]}天较长，资金占用风险。`,
+        suggestion: '建议缩短至15-30天，或约定预付款。',
         category: '财务风险',
       });
     }
   }
   
-  // Analyze jurisdiction
+  // Jurisdiction analysis
   if (hasJurisdiction) {
-    const unfavorableJurisdiction = /被告所在地|甲方所在地|对方所在地/i.test(contractText);
-    if (unfavorableJurisdiction) {
+    const badJurisdiction = /被告所在地|甲方所在地|对方所在地/i.test(contractText);
+    if (badJurisdiction) {
       risks.push({
-        id: `ai-risk-${risks.length + 1}`,
+        id: `risk-${risks.length + 1}`,
         clause: '争议解决条款',
         location: '争议解决',
         riskType: 'legal',
         severity: 'high',
-        explanation: '约定在被告所在地法院管辖，对我方可能不利，增加诉讼成本。',
-        suggestion: '建议改为"原告所在地或合同签订地法院管辖"，或约定仲裁。',
+        explanation: '约定在对方所在地管辖，增加我方诉讼成本。',
+        suggestion: '建议改为"原告所在地或合同签订地"法院管辖。',
         category: '法律风险',
         law: '《民事诉讼法》第34条',
       });
     }
   }
   
-  // Analyze penalty
-  const penaltyMatch = contractText.match(/违约金.*?([\d.]+%|百分之[一二三四五六七八九十]+)/i);
+  // Penalty analysis
+  const penaltyMatch = contractText.match(/违约金.*?([\d.]+%)/i);
   if (penaltyMatch) {
-    const penaltyPercent = penaltyMatch[1].includes('%') 
-      ? parseFloat(penaltyMatch[1]) 
-      : 30;
-    if (penaltyPercent > 20) {
+    const percent = parseFloat(penaltyMatch[1]);
+    if (percent > 20) {
       risks.push({
-        id: `ai-risk-${risks.length + 1}`,
+        id: `risk-${risks.length + 1}`,
         clause: penaltyMatch[0],
         location: '违约责任',
         riskType: 'legal',
         severity: 'high',
-        explanation: `违约金约定为${penaltyMatch[1]}，可能被法院认定为过高而调减。`,
-        suggestion: '建议约定"不超过实际损失的130%"或设置具体金额上限。',
+        explanation: `违约金${percent}%过高，可能被法院调减。`,
+        suggestion: '建议约定"不超过实际损失的130"。',
         category: '法律风险',
         law: '《民法典》第585条',
       });
     }
   }
   
-  // Analyze confidentiality
+  // Missing clauses
   if (!hasConfidentiality) {
     risks.push({
-      id: `ai-risk-${risks.length + 1}`,
+      id: `risk-${risks.length + 1}`,
       clause: '合同全文',
       location: '整体',
       riskType: 'legal',
       severity: 'medium',
-      explanation: '未检测到保密条款，涉及商业信息保护不足。',
-      suggestion: '建议增加保密条款，明确保密信息范围、期限和违约责任。',
+      explanation: '缺少保密条款，商业秘密保护不足。',
+      suggestion: '增加保密条款，明确保密范围和期限。',
       category: '法律风险',
     });
   }
   
-  // Analyze IP
-  if (!hasIP && /技术|开发|设计|创作|软件|系统/i.test(contractText)) {
+  // IP analysis
+  if (!hasIP && /技术|开发|软件|设计/i.test(contractText)) {
     risks.push({
-      id: `ai-risk-${risks.length + 1}`,
+      id: `risk-${risks.length + 1}`,
       clause: '合同全文',
       location: '整体',
       riskType: 'legal',
       severity: 'medium',
-      explanation: '合同涉及技术服务/创作，但未明确知识产权归属。',
-      suggestion: '建议明确约定知识产权的归属、使用范围及后续改进权益。',
+      explanation: '涉及技术/创作，但未明确知识产权归属。',
+      suggestion: '明确约定知识产权归属和使用范围。',
       category: '知识产权',
     });
   }
   
-  // Analyze warranty
-  if (!hasWarranty && /采购|供货|设备|产品/i.test(contractText)) {
-    risks.push({
-      id: `ai-risk-${risks.length + 1}`,
-      clause: '合同全文',
-      location: '整体',
-      riskType: 'commercial',
-      severity: 'low',
-      explanation: '未明确质量保证条款和质保期限。',
-      suggestion: '建议约定质保期（通常12个月）及质保范围内的维修/更换责任。',
-      category: '商业风险',
-    });
-  }
-  
-  // Analyze liability limitation
-  if (!hasLiability && /服务|承包|委托/i.test(contractText)) {
-    risks.push({
-      id: `ai-risk-${risks.length + 1}`,
-      clause: '合同全文',
-      location: '整体',
-      riskType: 'legal',
-      severity: 'medium',
-      explanation: '未约定责任限制条款，可能导致无限赔偿责任。',
-      suggestion: '建议约定"赔偿不超过合同金额"或设置具体赔偿上限。',
-      category: '法律风险',
-    });
-  }
-  
-  // Calculate overall risk
+  // Calculate risk metrics
   const highRiskCount = risks.filter(r => r.severity === 'high').length;
   const mediumRiskCount = risks.filter(r => r.severity === 'medium').length;
   
   let overallRisk: 'high' | 'medium' | 'low' = 'low';
-  if (highRiskCount >= 2) {
-    overallRisk = 'high';
-  } else if (highRiskCount >= 1 || mediumRiskCount >= 2) {
-    overallRisk = 'medium';
-  }
+  if (highRiskCount >= 2) overallRisk = 'high';
+  else if (highRiskCount >= 1 || mediumRiskCount >= 2) overallRisk = 'medium';
   
-  // Calculate risk score (0-100, higher is better/less risky)
   const riskScore = Math.max(0, 100 - highRiskCount * 25 - mediumRiskCount * 15);
   
-  // Missing clauses
   const missingClauses: string[] = [];
   if (!hasConfidentiality) missingClauses.push('保密条款');
   if (!hasTermination) missingClauses.push('不可抗力条款');
   if (!/通知|送达/i.test(contractText)) missingClauses.push('通知送达条款');
-  if (!/附件/i.test(contractText)) missingClauses.push('合同附件清单');
-  if (!hasLiability) missingClauses.push('责任限制条款');
   
   return {
     id: 'mock-review',
@@ -245,46 +216,43 @@ export function generateMockAIReview(contractText: string): AIReview {
     riskScore,
     keyRisks: risks,
     missingClauses,
-    thinking: `经过对合同的全面审查，发现${risks.length}个主要风险点。${highRiskCount > 0 ? '其中存在' + highRiskCount + '个高风险项需要重点关注。' : ''}${mediumRiskCount > 0 ? '同时发现' + mediumRiskCount + '个中风险项建议改进。' : ''}建议优先处理管辖条款和违约责任条款的修改。`,
+    thinking: `分析发现${risks.length}个风险点：${highRiskCount}个高风险，${mediumRiskCount}个中风险。${highRiskCount > 0 ? '重点关注管辖和违约责任条款。' : '整体风险可控。'}`,
     createdAt: new Date().toISOString(),
   };
 }
 
-// Qwen API call (DashScope compatible mode)
+// Qwen API call
 export async function analyzeContractWithQwen(contractText: string): Promise<AIReview> {
+  console.log('=== Qwen API Analysis Started ===');
+  console.log('API Key configured:', QWEN_API_KEY ? 'Yes' : 'No');
+  console.log('Contract text length:', contractText?.length || 0);
+  
   if (!QWEN_API_KEY) {
-    console.log('No Qwen API key found, using mock analysis');
+    console.log('No Qwen API key, falling back to mock');
     return generateMockAIReview(contractText);
   }
   
   try {
-    console.log('Calling Qwen API for contract analysis...');
-    console.log('API URL:', QWEN_API_URL);
-    console.log('Contract text length:', contractText.length);
+    // Prepare contract text (truncate if too long)
+    const maxLength = 6000;
+    const processedText = contractText?.length > maxLength 
+      ? contractText.substring(0, maxLength) + '\n...（合同内容已截断）'
+      : (contractText || '');
     
-    // Truncate contract text if too long (Qwen has token limits)
-    const maxLength = 8000;
-    const truncatedText = contractText.length > maxLength 
-      ? contractText.substring(0, maxLength) + '\n... (合同内容已截断)' 
-      : contractText;
+    const prompt = REVIEW_PROMPT_TEMPLATE.replace('{contractText}', processedText);
+    
+    console.log('Calling Qwen API...');
+    console.log('API URL:', QWEN_API_URL);
     
     const requestBody = {
       model: 'qwen-plus',
       messages: [
-        { 
-          role: 'system', 
-          content: 'You are a legal contract review assistant. You must respond in valid JSON format only. Do not include any markdown formatting, explanations, or extra text outside the JSON.' 
-        },
-        { 
-          role: 'user', 
-          content: REVIEW_PROMPT + truncatedText 
-        },
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: prompt },
       ],
-      temperature: 0.3,
-      max_tokens: 4000,
+      temperature: 0.2,
+      max_tokens: 3000,
     };
-    
-    console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
     const response = await fetch(`${QWEN_API_URL}/chat/completions`, {
       method: 'POST',
@@ -295,68 +263,92 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
       body: JSON.stringify(requestBody),
     });
     
+    console.log('Qwen API response status:', response.status);
+    
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Qwen API error response:', errorText);
-      throw new Error(`Qwen API error: ${response.status} - ${errorText}`);
+      console.error('Qwen API error:', response.status, errorText);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
     }
     
     const data = await response.json();
     console.log('Qwen API response received');
     
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      console.error('Invalid Qwen API response structure:', data);
-      throw new Error('Invalid Qwen API response structure');
+    if (!data.choices?.[0]?.message?.content) {
+      console.error('Invalid response structure:', JSON.stringify(data));
+      throw new Error('Invalid API response structure');
     }
     
     const content = data.choices[0].message.content;
-    console.log('Qwen response content:', content.substring(0, 200));
+    console.log('Raw response (first 500 chars):', content.substring(0, 500));
     
-    // Parse the JSON response
+    // Parse JSON response
     let result: any;
     try {
-      // Try to extract JSON from markdown code block if present
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)```/) || content.match(/```\s*([\s\S]*?)```/);
-      const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+      // Try to extract JSON from various formats
+      let jsonStr = content.trim();
       
-      // Remove any non-JSON prefix/suffix
-      const jsonStart = jsonStr.indexOf('{');
-      const jsonEnd = jsonStr.lastIndexOf('}');
-      const cleanJson = jsonStart >= 0 && jsonEnd > jsonStart 
-        ? jsonStr.substring(jsonStart, jsonEnd + 1) 
-        : jsonStr;
+      // Remove markdown code blocks if present
+      const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1].trim();
+      }
       
-      result = JSON.parse(cleanJson);
-      console.log('Successfully parsed Qwen response');
+      // Find JSON boundaries
+      const startIdx = jsonStr.indexOf('{');
+      const endIdx = jsonStr.lastIndexOf('}');
+      
+      if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+        throw new Error('No JSON object found in response');
+      }
+      
+      jsonStr = jsonStr.substring(startIdx, endIdx + 1);
+      console.log('Extracted JSON (first 300 chars):', jsonStr.substring(0, 300));
+      
+      result = JSON.parse(jsonStr);
+      console.log('JSON parsed successfully');
+      
     } catch (parseError) {
-      console.error('Failed to parse Qwen response as JSON:', parseError);
-      console.log('Raw content:', content);
-      throw new Error('Failed to parse Qwen response as JSON');
+      console.error('JSON parse error:', parseError);
+      console.error('Raw content:', content);
+      throw new Error('Failed to parse API response as JSON');
     }
     
-    // Validate result structure
+    // Validate and format result
     if (!result.keyRisks || !Array.isArray(result.keyRisks)) {
-      console.warn('Qwen response missing keyRisks, using mock fallback');
-      return generateMockAIReview(contractText);
+      console.warn('Response missing keyRisks, using fallback');
+      result.keyRisks = [];
     }
     
-    return {
-      id: 'qwen-review',
+    const aiReview: AIReview = {
+      id: `qwen-${Date.now()}`,
       contractId: '',
       overallRisk: result.overallRisk || 'medium',
-      riskScore: result.riskScore || 70,
-      keyRisks: result.keyRisks.map((risk: RiskItem, index: number) => ({
-        ...risk,
-        id: `ai-risk-${index + 1}`,
+      riskScore: typeof result.riskScore === 'number' ? result.riskScore : 70,
+      keyRisks: result.keyRisks.map((risk: any, index: number) => ({
+        id: `qwen-risk-${index + 1}`,
+        clause: risk.clause || '未指定',
+        location: risk.location || '未知位置',
+        riskType: risk.riskType || 'legal',
+        severity: risk.severity || 'medium',
+        explanation: risk.explanation || '无说明',
+        suggestion: risk.suggestion || '无建议',
+        category: risk.category || '一般风险',
+        law: risk.law,
       })),
       missingClauses: result.missingClauses || [],
       thinking: result.thinking || 'AI分析完成',
       createdAt: new Date().toISOString(),
     };
+    
+    console.log('Qwen analysis completed, found', aiReview.keyRisks.length, 'risks');
+    console.log('=== Qwen API Analysis Completed ===');
+    
+    return aiReview;
+    
   } catch (error) {
-    console.error('Qwen analysis failed:', error);
-    // Return mock review as fallback
-    console.log('Falling back to mock review due to error');
+    console.error('Qwen API failed:', error);
+    console.log('Falling back to mock review');
     return generateMockAIReview(contractText);
   }
 }
@@ -364,17 +356,16 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
 // DeepSeek API call
 export async function analyzeContractWithDeepSeek(contractText: string): Promise<AIReview> {
   if (!DEEPSEEK_API_KEY) {
-    console.log('No DeepSeek API key found, using mock analysis');
     return generateMockAIReview(contractText);
   }
   
   try {
-    console.log('Calling DeepSeek API for contract analysis...');
+    const maxLength = 6000;
+    const processedText = contractText?.length > maxLength 
+      ? contractText.substring(0, maxLength) + '\n...（已截断）'
+      : (contractText || '');
     
-    const maxLength = 8000;
-    const truncatedText = contractText.length > maxLength 
-      ? contractText.substring(0, maxLength) + '\n... (合同内容已截断)' 
-      : contractText;
+    const prompt = REVIEW_PROMPT_TEMPLATE.replace('{contractText}', processedText);
     
     const response = await fetch(`${DEEPSEEK_API_URL}/chat/completions`, {
       method: 'POST',
@@ -385,50 +376,55 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages: [
-          { role: 'system', content: 'You are a legal contract review assistant. Always respond in valid JSON format.' },
-          { role: 'user', content: REVIEW_PROMPT + truncatedText },
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
         ],
-        temperature: 0.3,
-        max_tokens: 4000,
+        temperature: 0.2,
+        max_tokens: 3000,
       }),
     });
     
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
+      throw new Error(`DeepSeek API error: ${response.status}`);
     }
     
     const data = await response.json();
     const content = data.choices[0].message.content;
     
-    // Parse the JSON response
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)```/) || content.match(/```\s*([\s\S]*?)```/);
-    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    // Parse JSON
+    let jsonStr = content.trim();
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) jsonStr = codeBlockMatch[1].trim();
+    
+    const startIdx = jsonStr.indexOf('{');
+    const endIdx = jsonStr.lastIndexOf('}');
+    jsonStr = jsonStr.substring(startIdx, endIdx + 1);
     
     const result = JSON.parse(jsonStr);
     
     return {
-      id: 'deepseek-review',
+      id: `deepseek-${Date.now()}`,
       contractId: '',
-      overallRisk: result.overallRisk,
-      riskScore: result.riskScore,
-      keyRisks: result.keyRisks.map((risk: RiskItem, index: number) => ({
+      overallRisk: result.overallRisk || 'medium',
+      riskScore: result.riskScore || 70,
+      keyRisks: (result.keyRisks || []).map((risk: any, index: number) => ({
+        id: `deepseek-risk-${index + 1}`,
         ...risk,
-        id: `ai-risk-${index + 1}`,
       })),
       missingClauses: result.missingClauses || [],
-      thinking: result.thinking,
+      thinking: result.thinking || '分析完成',
       createdAt: new Date().toISOString(),
     };
+    
   } catch (error) {
-    console.error('DeepSeek analysis failed:', error);
+    console.error('DeepSeek API failed:', error);
     return generateMockAIReview(contractText);
   }
 }
 
 // Unified analysis function
 export async function analyzeContract(contractText: string): Promise<AIReview> {
-  console.log(`Using AI provider: ${AI_PROVIDER}`);
+  console.log(`=== analyzeContract called, provider: ${AI_PROVIDER} ===`);
   
   switch (AI_PROVIDER) {
     case 'qwen':
@@ -436,78 +432,18 @@ export async function analyzeContract(contractText: string): Promise<AIReview> {
     case 'deepseek':
       return analyzeContractWithDeepSeek(contractText);
     default:
+      console.log('Using mock analysis');
       return generateMockAIReview(contractText);
   }
 }
 
-// Generate contract template based on requirements
-export async function generateContractTemplate(
-  type: string, 
-  requirements: string
-): Promise<string> {
-  const prompt = `
-根据以下需求，生成一份${type}合同的基本框架，包含主要条款：
-
-需求描述：${requirements}
-
-请生成专业的合同文本，包含：
-1. 合同标题
-2. 双方信息
-3. 主要条款（标的、价款、履行期限、违约责任等）
-4. 争议解决条款
-5. 其他必要条款
-
-返回纯文本格式。
-`;
-
-  // Mock implementation
-  return `合同编号：_________
-
-${type}合同
-
-甲方（委托方）：_________
-乙方（受托方）：_________
-
-鉴于：
-${requirements}
-
-双方经友好协商，达成如下协议：
-
-第一条 合同标的
-_________
-
-第二条 合同价款及支付方式
-1. 合同总金额为人民币_________元（大写：_________）。
-2. 付款方式：_________
-
-第三条 履行期限
-本合同自____年__月__日起至____年__月__日止。
-
-第四条 双方权利义务
-1. 甲方权利义务：_________
-2. 乙方权利义务：_________
-
-第五条 知识产权
-_________
-
-第六条 保密条款
-双方对本合同内容及履行过程中知悉的商业秘密负有保密义务。
-
-第七条 违约责任
-1. 任何一方违反本合同约定，应承担违约责任。
-2. 违约金为合同总金额的____%。
-
-第八条 争议解决
-因本合同引起的争议，双方应友好协商解决；协商不成的，提交_________仲裁委员会仲裁。
-
-第九条 其他
-1. 本合同一式两份，双方各执一份。
-2. 本合同自双方签字盖章之日起生效。
-
-（以下无正文）
-
-甲方（盖章）：_________    乙方（盖章）：_________
-授权代表：_________        授权代表：_________
-日期：____年__月__日        日期：____年__月__日
-`;
+// Export for debugging
+export function getAIConfig() {
+  return {
+    provider: AI_PROVIDER,
+    hasQwenKey: !!QWEN_API_KEY,
+    hasDeepSeekKey: !!DEEPSEEK_API_KEY,
+    qwenUrl: QWEN_API_URL,
+    deepseekUrl: DEEPSEEK_API_URL,
+  };
 }
