@@ -4,16 +4,16 @@ import { AIReview, RiskItem } from '@/types';
 const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/v1';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
-// Qwen API Configuration
+// Qwen API Configuration (DashScope)
 const QWEN_API_URL = process.env.QWEN_API_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const QWEN_API_KEY = process.env.QWEN_API_KEY || '';
 
 // Determine which AI provider to use
+// Priority: 1. Explicit AI_PROVIDER setting, 2. Qwen if key available, 3. DeepSeek if key available, 4. Mock
 const AI_PROVIDER = process.env.AI_PROVIDER || (QWEN_API_KEY ? 'qwen' : DEEPSEEK_API_KEY ? 'deepseek' : 'mock');
 
 // Review Prompt for AI
-const REVIEW_PROMPT = `
-你是一名资深企业法务顾问，拥有10年合同审查经验。请对以下合同进行专业审查：
+const REVIEW_PROMPT = `你是一名资深企业法务顾问，拥有10年合同审查经验。请对以下合同进行专业审查：
 
 【审查重点】
 1. 权利义务对等性（是否存在明显不对等条款）
@@ -24,25 +24,30 @@ const REVIEW_PROMPT = `
 6. 付款与交付条款（账期、验收标准）
 7. 争议解决条款（管辖、适用法律）
 
-【输出格式】
-返回严格JSON格式，不要包含任何markdown代码块标记：
+【输出格式要求】
+必须返回严格JSON格式，不要包含任何markdown代码块标记，不要添加任何额外说明文字，只返回纯JSON：
 {
   "overallRisk": "high/medium/low",
   "riskScore": 78,
   "keyRisks": [
     {
-      "clause": "条款原文摘要",
+      "clause": "条款原文摘要（50字以内）",
       "location": "第X条",
       "riskType": "legal/commercial/operational",
       "severity": "high/medium/low",
-      "explanation": "风险说明",
-      "suggestion": "修改建议",
-      "precedent": "类似案例后果（如有）"
+      "explanation": "风险说明（100字以内）",
+      "suggestion": "修改建议（100字以内）",
+      "category": "风险类别"
     }
   ],
-  "missingClauses": ["建议补充的条款"],
-  "thinking": "思考过程（展示给法务参考）"
+  "missingClauses": ["建议补充的条款1", "建议补充的条款2"],
+  "thinking": "分析思考过程（200字以内）"
 }
+
+【重要】
+- 如果合同内容较短，返回 fewer risks
+- 如果没有明显风险，riskScore 可以给 85-95 分
+- 必须返回合法的 JSON 格式
 
 合同文本：
 `;
@@ -245,7 +250,7 @@ export function generateMockAIReview(contractText: string): AIReview {
   };
 }
 
-// Qwen API call
+// Qwen API call (DashScope compatible mode)
 export async function analyzeContractWithQwen(contractText: string): Promise<AIReview> {
   if (!QWEN_API_KEY) {
     console.log('No Qwen API key found, using mock analysis');
@@ -254,6 +259,32 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
   
   try {
     console.log('Calling Qwen API for contract analysis...');
+    console.log('API URL:', QWEN_API_URL);
+    console.log('Contract text length:', contractText.length);
+    
+    // Truncate contract text if too long (Qwen has token limits)
+    const maxLength = 8000;
+    const truncatedText = contractText.length > maxLength 
+      ? contractText.substring(0, maxLength) + '\n... (合同内容已截断)' 
+      : contractText;
+    
+    const requestBody = {
+      model: 'qwen-plus',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You are a legal contract review assistant. You must respond in valid JSON format only. Do not include any markdown formatting, explanations, or extra text outside the JSON.' 
+        },
+        { 
+          role: 'user', 
+          content: REVIEW_PROMPT + truncatedText 
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 4000,
+    };
+    
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
     const response = await fetch(`${QWEN_API_URL}/chat/completions`, {
       method: 'POST',
@@ -261,47 +292,71 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${QWEN_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: 'qwen-plus',
-        messages: [
-          { role: 'system', content: 'You are a legal contract review assistant. Always respond in valid JSON format.' },
-          { role: 'user', content: REVIEW_PROMPT + contractText },
-        ],
-        temperature: 0.3,
-        max_tokens: 4000,
-        response_format: { type: 'json_object' },
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('Qwen API error response:', errorText);
       throw new Error(`Qwen API error: ${response.status} - ${errorText}`);
     }
     
     const data = await response.json();
+    console.log('Qwen API response received');
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error('Invalid Qwen API response structure:', data);
+      throw new Error('Invalid Qwen API response structure');
+    }
+    
     const content = data.choices[0].message.content;
+    console.log('Qwen response content:', content.substring(0, 200));
     
     // Parse the JSON response
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)```/) || content.match(/```\s*([\s\S]*?)```/);
-    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    let result: any;
+    try {
+      // Try to extract JSON from markdown code block if present
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)```/) || content.match(/```\s*([\s\S]*?)```/);
+      const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+      
+      // Remove any non-JSON prefix/suffix
+      const jsonStart = jsonStr.indexOf('{');
+      const jsonEnd = jsonStr.lastIndexOf('}');
+      const cleanJson = jsonStart >= 0 && jsonEnd > jsonStart 
+        ? jsonStr.substring(jsonStart, jsonEnd + 1) 
+        : jsonStr;
+      
+      result = JSON.parse(cleanJson);
+      console.log('Successfully parsed Qwen response');
+    } catch (parseError) {
+      console.error('Failed to parse Qwen response as JSON:', parseError);
+      console.log('Raw content:', content);
+      throw new Error('Failed to parse Qwen response as JSON');
+    }
     
-    const result = JSON.parse(jsonStr);
+    // Validate result structure
+    if (!result.keyRisks || !Array.isArray(result.keyRisks)) {
+      console.warn('Qwen response missing keyRisks, using mock fallback');
+      return generateMockAIReview(contractText);
+    }
     
     return {
       id: 'qwen-review',
       contractId: '',
-      overallRisk: result.overallRisk,
-      riskScore: result.riskScore,
+      overallRisk: result.overallRisk || 'medium',
+      riskScore: result.riskScore || 70,
       keyRisks: result.keyRisks.map((risk: RiskItem, index: number) => ({
         ...risk,
         id: `ai-risk-${index + 1}`,
       })),
       missingClauses: result.missingClauses || [],
-      thinking: result.thinking,
+      thinking: result.thinking || 'AI分析完成',
       createdAt: new Date().toISOString(),
     };
   } catch (error) {
     console.error('Qwen analysis failed:', error);
+    // Return mock review as fallback
+    console.log('Falling back to mock review due to error');
     return generateMockAIReview(contractText);
   }
 }
@@ -316,6 +371,11 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
   try {
     console.log('Calling DeepSeek API for contract analysis...');
     
+    const maxLength = 8000;
+    const truncatedText = contractText.length > maxLength 
+      ? contractText.substring(0, maxLength) + '\n... (合同内容已截断)' 
+      : contractText;
+    
     const response = await fetch(`${DEEPSEEK_API_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -326,7 +386,7 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
         model: 'deepseek-chat',
         messages: [
           { role: 'system', content: 'You are a legal contract review assistant. Always respond in valid JSON format.' },
-          { role: 'user', content: REVIEW_PROMPT + contractText },
+          { role: 'user', content: REVIEW_PROMPT + truncatedText },
         ],
         temperature: 0.3,
         max_tokens: 4000,
@@ -380,50 +440,27 @@ export async function analyzeContract(contractText: string): Promise<AIReview> {
   }
 }
 
-// Compare Qwen vs DeepSeek for contract review
-/*
-## 模型对比分析
-
-### Qwen (通义千问) 优势：
-1. **中文理解能力强**：在中文法律文本理解方面表现优秀
-2. **JSON格式输出稳定**：支持 response_format: { type: 'json_object' }
-3. **国内访问稳定**：阿里云提供服务，国内访问速度快
-4. **成本较低**：相比DeepSeek，token价格更优惠
-5. **长文本支持**：支持较长的合同文本输入
-
-### DeepSeek 优势：
-1. **推理能力较强**：在复杂逻辑推理方面表现更好
-2. **专业领域深度**：在某些专业法律领域理解更深入
-3. **性价比**：在同等效果下成本较低
-
-### 推荐：
-- **国内部署/主要中文合同**：推荐 Qwen Plus
-- **复杂国际合同/需要深度推理**：推荐 DeepSeek
-- **Demo/测试**：Mock模式足够展示功能
-
-### API配置方式：
-
-#### Qwen配置：
-```bash
-QWEN_API_KEY=sk-your-qwen-api-key
-AI_PROVIDER=qwen
-```
-
-#### DeepSeek配置：
-```bash
-DEEPSEEK_API_KEY=sk-your-deepseek-api-key
-AI_PROVIDER=deepseek
-```
-
-如果不配置任何API key，系统将自动使用Mock模式。
-*/
-
 // Generate contract template based on requirements
 export async function generateContractTemplate(
   type: string, 
   requirements: string
 ): Promise<string> {
-  // ... existing template generation code ...
+  const prompt = `
+根据以下需求，生成一份${type}合同的基本框架，包含主要条款：
+
+需求描述：${requirements}
+
+请生成专业的合同文本，包含：
+1. 合同标题
+2. 双方信息
+3. 主要条款（标的、价款、履行期限、违约责任等）
+4. 争议解决条款
+5. 其他必要条款
+
+返回纯文本格式。
+`;
+
+  // Mock implementation
   return `合同编号：_________
 
 ${type}合同
