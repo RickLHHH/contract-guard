@@ -42,7 +42,6 @@ import { RISK_LEVEL_COLORS, CONTRACT_STATUS_LABELS, CONTRACT_TYPE_LABELS } from 
 import { formatDate, formatNumber, getInitials, timeAgo } from "@/lib/utils";
 import { UploadContractDialog } from "@/components/upload-contract-dialog";
 import { useUser } from "@/lib/user-context";
-import { RoleSwitcher } from "@/components/role-switcher";
 
 const RISK_COLORS = {
   A: "#ef4444",
@@ -125,11 +124,6 @@ export default function Dashboard() {
             <span className="text-xl font-bold">ContractGuard</span>
           </div>
           <div className="flex items-center gap-4">
-            <RoleSwitcher currentUser={user} onSwitch={(newUser) => {
-              // 存储选中的用户到本地存储
-              localStorage.setItem('test-user', JSON.stringify(newUser));
-              setUser(newUser as any);
-            }} />
             <Button variant="outline" size="icon">
               <Search className="w-4 h-4" />
             </Button>

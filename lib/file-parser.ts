@@ -59,26 +59,39 @@ export async function parseFile(buffer: Buffer, mimeType: string, filename: stri
   try {
     switch (mimeType) {
       case 'application/pdf':
-        result = await parsePDF(buffer);
+        result = await parsePDF(buffer, filename);
         break;
       case 'application/msword':
       case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        result = await parseWord(buffer);
+        result = await parseWord(buffer, filename);
         break;
       case 'text/plain':
-        result = parseText(buffer);
+        result = parseText(buffer, filename);
         break;
       default:
         // 尝试根据文件扩展名判断
         const ext = filename.split('.').pop()?.toLowerCase();
         if (ext === 'pdf') {
-          result = await parsePDF(buffer);
+          result = await parsePDF(buffer, filename);
         } else if (ext === 'doc' || ext === 'docx') {
-          result = await parseWord(buffer);
+          result = await parseWord(buffer, filename);
         } else if (ext === 'txt') {
-          result = parseText(buffer);
+          result = parseText(buffer, filename);
         } else {
-          throw new Error(`不支持的文件类型: ${mimeType}`);
+          // 不支持的文件类型，返回提示信息
+          return {
+            text: `[文件: ${filename}]\n\n不支持的文件类型: ${mimeType}\n\n请上传以下格式的文件：\n- PDF (.pdf)\n- Word (.doc, .docx)\n- 纯文本 (.txt)`,
+            metadata: {
+              pageCount: 1,
+              wordCount: 0,
+              charCount: 0,
+            },
+            structure: {
+              paragraphs: [],
+              clauses: [],
+              tables: [],
+            },
+          };
         }
     }
 
@@ -88,17 +101,48 @@ export async function parseFile(buffer: Buffer, mimeType: string, filename: stri
     return result;
   } catch (error) {
     console.error('[FileParser] 解析失败:', error);
-    throw new Error(`文件解析失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    // 返回一个带有错误信息的默认结果，而不是抛出错误
+    return {
+      text: `[文件: ${filename}]\n\n文档解析时遇到错误: ${error instanceof Error ? error.message : '未知错误'}\n\n请尝试：\n1. 检查文件是否损坏\n2. 转换为其他格式（PDF/Word/TXT）后重新上传`,
+      metadata: {
+        pageCount: 1,
+        wordCount: 0,
+        charCount: 0,
+      },
+      structure: {
+        paragraphs: [],
+        clauses: [],
+        tables: [],
+      },
+    };
   }
 }
 
 /**
  * 解析 PDF 文件
  */
-async function parsePDF(buffer: Buffer): Promise<ParseResult> {
+async function parsePDF(buffer: Buffer, filename: string = 'document.pdf'): Promise<ParseResult> {
   try {
     const pdfData = await (pdfParse as any)(buffer);
     const text = cleanText(pdfData.text);
+    
+    // 如果解析出的文本为空或太短，返回提示信息
+    if (!text || text.length < 50) {
+      console.warn('[FileParser] PDF 解析文本过短，可能无法读取内容');
+      return {
+        text: `[PDF文件: ${filename}]\n\n该PDF文件可能是扫描件或图片格式，无法直接提取文本内容。请上传包含可选文字层的PDF文件，或转换为Word格式后重新上传。`,
+        metadata: {
+          pageCount: pdfData.numpages || 1,
+          wordCount: 0,
+          charCount: 0,
+        },
+        structure: {
+          paragraphs: [],
+          clauses: [],
+          tables: [],
+        },
+      };
+    }
     
     // 提取段落（按空行分割）
     const paragraphs = extractParagraphs(text);
@@ -124,18 +168,47 @@ async function parsePDF(buffer: Buffer): Promise<ParseResult> {
     };
   } catch (error) {
     console.error('[FileParser] PDF解析失败:', error);
-    throw error;
+    // 返回一个带有错误信息的默认结果，而不是抛出错误
+    return {
+      text: `[PDF文件: ${filename}]\n\n文档解析时遇到错误: ${error instanceof Error ? error.message : '无法读取PDF内容'}\n\n请尝试：\n1. 确保PDF不是扫描件\n2. 转换为Word格式后重新上传\n3. 使用纯文本格式(.txt)`,
+      metadata: {
+        pageCount: 1,
+        wordCount: 0,
+        charCount: 0,
+      },
+      structure: {
+        paragraphs: [],
+        clauses: [],
+        tables: [],
+      },
+    };
   }
 }
 
 /**
  * 解析 Word 文件
  */
-async function parseWord(buffer: Buffer): Promise<ParseResult> {
+async function parseWord(buffer: Buffer, filename: string = 'document.docx'): Promise<ParseResult> {
   try {
     // 使用 mammoth 提取纯文本
     const result = await (mammoth as any).extractRawText({ buffer });
     const text = cleanText(result.value);
+    
+    // 如果解析出的文本为空，返回提示
+    if (!text || text.length < 10) {
+      return {
+        text: `[Word文件: ${filename}]\n\n无法提取文档内容，请检查文件是否损坏或受密码保护。`,
+        metadata: {
+          wordCount: 0,
+          charCount: 0,
+        },
+        structure: {
+          paragraphs: [],
+          clauses: [],
+          tables: [],
+        },
+      };
+    }
     
     // 提取段落
     const paragraphs = extractParagraphs(text);
@@ -144,8 +217,13 @@ async function parseWord(buffer: Buffer): Promise<ParseResult> {
     const clauses = extractClauses(text);
     
     // 尝试提取表格（使用 HTML 转换）
-    const htmlResult = await (mammoth as any).convertToHtml({ buffer });
-    const tables = extractTablesFromHtml(htmlResult.value);
+    let tables: TableData[] = [];
+    try {
+      const htmlResult = await (mammoth as any).convertToHtml({ buffer });
+      tables = extractTablesFromHtml(htmlResult.value);
+    } catch {
+      // 表格提取失败不影响整体解析
+    }
     
     return {
       text,
@@ -161,30 +239,57 @@ async function parseWord(buffer: Buffer): Promise<ParseResult> {
     };
   } catch (error) {
     console.error('[FileParser] Word解析失败:', error);
-    throw error;
+    return {
+      text: `[Word文件: ${filename}]\n\n文档解析失败: ${error instanceof Error ? error.message : '无法读取Word内容'}`,
+      metadata: {
+        wordCount: 0,
+        charCount: 0,
+      },
+      structure: {
+        paragraphs: [],
+        clauses: [],
+        tables: [],
+      },
+    };
   }
 }
 
 /**
  * 解析纯文本文件
  */
-function parseText(buffer: Buffer): ParseResult {
-  const text = cleanText(buffer.toString('utf-8'));
-  const paragraphs = extractParagraphs(text);
-  const clauses = extractClauses(text);
-  
-  return {
-    text,
-    metadata: {
-      wordCount: countWords(text),
-      charCount: text.length,
-    },
-    structure: {
-      paragraphs,
-      clauses,
-      tables: [],
-    },
-  };
+function parseText(buffer: Buffer, filename: string = 'document.txt'): ParseResult {
+  try {
+    const text = cleanText(buffer.toString('utf-8'));
+    const paragraphs = extractParagraphs(text);
+    const clauses = extractClauses(text);
+    
+    return {
+      text,
+      metadata: {
+        wordCount: countWords(text),
+        charCount: text.length,
+      },
+      structure: {
+        paragraphs,
+        clauses,
+        tables: [],
+      },
+    };
+  } catch (error) {
+    console.error('[FileParser] 文本解析失败:', error);
+    return {
+      text: `[文本文件: ${filename}]\n\n无法读取文件内容，请确保文件编码为 UTF-8。`,
+      metadata: {
+        wordCount: 0,
+        charCount: 0,
+      },
+      structure: {
+        paragraphs: [],
+        clauses: [],
+        tables: [],
+      },
+    };
+  }
 }
 
 /**

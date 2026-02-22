@@ -10,8 +10,8 @@ import { mkdir } from 'fs/promises';
 
 // 存储配置
 const STORAGE_CONFIG = {
-  // 本地存储路径
-  localPath: process.env.FILE_STORAGE_PATH || './uploads',
+  // 本地存储路径 - 使用 /tmp 目录在 Railway 上有写权限
+  localPath: process.env.FILE_STORAGE_PATH || '/tmp/uploads',
   // 最大文件大小 (20MB)
   maxFileSize: 20 * 1024 * 1024,
   // 允许的文件类型
