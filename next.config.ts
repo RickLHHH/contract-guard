@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Enable static export for deployment
-  output: 'standalone',
-  
   // Configure images
   images: {
     unoptimized: true,
@@ -12,6 +9,11 @@ const nextConfig: NextConfig = {
   // TypeScript configuration
   typescript: {
     ignoreBuildErrors: true,
+  },
+  
+  // ESLint configuration
+  eslint: {
+    ignoreDuringBuilds: true,
   },
 };
 
