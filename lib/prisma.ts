@@ -18,7 +18,7 @@ const createMockPrisma = (): PrismaClient => {
   const users: User[] = [
     {
       id: 'user-1',
-      email: 'business@example.com',
+      email: 'business@contractguard.com',
       name: '张业务',
       role: UserRole.BUSINESS_USER,
       department: '采购部',
@@ -27,7 +27,7 @@ const createMockPrisma = (): PrismaClient => {
     },
     {
       id: 'user-2',
-      email: 'legal@example.com',
+      email: 'legal@contractguard.com',
       name: '李法务',
       role: UserRole.LEGAL_SPECIALIST,
       department: '法务部',
@@ -36,10 +36,28 @@ const createMockPrisma = (): PrismaClient => {
     },
     {
       id: 'user-3',
-      email: 'director@example.com',
+      email: 'director@contractguard.com',
       name: '王总监',
       role: UserRole.LEGAL_DIRECTOR,
       department: '法务部',
+      avatar: '',
+      createdAt: new Date(),
+    },
+    {
+      id: 'user-4',
+      email: 'finance@contractguard.com',
+      name: '赵财务',
+      role: UserRole.FINANCE,
+      department: '财务部',
+      avatar: '',
+      createdAt: new Date(),
+    },
+    {
+      id: 'user-5',
+      email: 'admin@contractguard.com',
+      name: '系统管理员',
+      role: UserRole.ADMIN,
+      department: 'IT部',
       avatar: '',
       createdAt: new Date(),
     },
