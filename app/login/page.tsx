@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Shield, Loader2 } from "lucide-react";
+import { Shield, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,10 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loginSuccess, setLoginSuccess] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,15 +31,55 @@ export default function LoginPage() {
         throw new Error(data.error || "登录失败");
       }
 
-      toast.success("登录成功");
-      // 使用 window.location 进行硬跳转，确保中间件能正确识别登录状态
-      window.location.href = "/";
+      console.log("[Login] 登录成功:", data);
+      toast.success("登录成功！");
+      setLoginSuccess(true);
+      
+      // 延迟跳转，让用户看到成功提示
+      setTimeout(() => {
+        console.log("[Login] 开始跳转到首页...");
+        // 使用多种方式尝试跳转
+        if (typeof window !== 'undefined') {
+          window.location.replace("/");
+        }
+      }, 500);
     } catch (error) {
+      console.error("[Login] 登录错误:", error);
       toast.error(error instanceof Error ? error.message : "登录失败");
     } finally {
       setLoading(false);
     }
   };
+
+  const handleManualRedirect = () => {
+    window.location.replace("/");
+  };
+
+  // 登录成功后显示跳转按钮
+  if (loginSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardHeader>
+            <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Shield className="w-8 h-8 text-white" />
+            </div>
+            <CardTitle className="text-2xl">登录成功！</CardTitle>
+            <CardDescription>欢迎回来，{email}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-gray-500">
+              如果没有自动跳转，请点击下方按钮进入系统
+            </p>
+            <Button onClick={handleManualRedirect} className="w-full" size="lg">
+              进入系统
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">

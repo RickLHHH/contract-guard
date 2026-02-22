@@ -3,8 +3,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
-import { verifyPassword, generateToken, setAuthCookie } from '@/lib/auth';
+import { verifyPassword, generateToken } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,11 +55,21 @@ export async function POST(request: NextRequest) {
       name: user.name,
     });
 
-    // 设置 Cookie
-    await setAuthCookie(token);
+    // 设置 Cookie（始终使用非 secure 以便在 Railway 上测试）
+    const cookieStore = await cookies();
+    cookieStore.set('auth-token', token, {
+      httpOnly: true,
+      secure: false, // Railway 上使用 false 以便测试
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7,
+      path: '/',
+    });
+
+    console.log('[Auth] Cookie 设置成功，用户:', user.email);
 
     return NextResponse.json({
       success: true,
+      token, // 同时返回 token 让前端可以选择使用
       user: {
         id: user.id,
         email: user.email,
