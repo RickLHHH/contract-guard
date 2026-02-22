@@ -33,8 +33,8 @@ export default function LoginPage() {
       }
 
       toast.success("登录成功");
-      router.push("/");
-      router.refresh();
+      // 使用 window.location 进行硬跳转，确保中间件能正确识别登录状态
+      window.location.href = "/";
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "登录失败");
     } finally {
