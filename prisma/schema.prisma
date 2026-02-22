@@ -11,6 +11,7 @@ datasource db {
 model User {
   id            String    @id @default(uuid())
   email         String    @unique
+  passwordHash  String?   // 密码哈希，可选（支持无密码登录）
   name          String
   role          UserRole  // BUSINESS_USER, LEGAL_SPECIALIST, LEGAL_DIRECTOR, ADMIN
   department    String?

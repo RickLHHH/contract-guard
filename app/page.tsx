@@ -16,6 +16,7 @@ import {
   Users,
   BookOpen,
   BarChart3,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -40,6 +41,7 @@ import { DashboardStats, Contract } from "@/types";
 import { RISK_LEVEL_COLORS, CONTRACT_STATUS_LABELS, CONTRACT_TYPE_LABELS } from "@/constants/rules";
 import { formatDate, formatNumber, getInitials, timeAgo } from "@/lib/utils";
 import { UploadContractDialog } from "@/components/upload-contract-dialog";
+import { useUser } from "@/lib/user-context";
 
 const RISK_COLORS = {
   A: "#ef4444",
@@ -50,6 +52,7 @@ const RISK_COLORS = {
 
 export default function Dashboard() {
   const router = useRouter();
+  const { user, logout } = useUser();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentContracts, setRecentContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,10 +130,19 @@ export default function Dashboard() {
             <Button variant="outline" size="icon">
               <Bell className="w-4 h-4" />
             </Button>
-            <Avatar className="h-8 w-8">
-              <AvatarImage src="/avatar.png" />
-              <AvatarFallback>法务</AvatarFallback>
-            </Avatar>
+            <div className="flex items-center gap-2">
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={user?.avatar} />
+                <AvatarFallback>{getInitials(user?.name || "用户")}</AvatarFallback>
+              </Avatar>
+              <div className="hidden md:block">
+                <p className="text-sm font-medium">{user?.name || "访客"}</p>
+                <p className="text-xs text-gray-500">{user?.role || "未登录"}</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={logout} title="退出登录">
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>
