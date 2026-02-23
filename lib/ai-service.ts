@@ -67,43 +67,96 @@ const SYSTEM_PROMPT = `你是一名资深企业法务总监，拥有15年企业�
 - 技术/数据类：重点关注数据权属、安全责任、开源协议合规`;
 
 // Review Prompt Template
-const REVIEW_PROMPT_TEMPLATE = `请审查以下合同文本，严格按照系统提示词中的【输出规范】返回JSON格式分析结果。
+const REVIEW_PROMPT_TEMPLATE = `对以下企业合同进行深度审查。合同类型：{contractType}，涉及金额：{contractAmount}万元，我方角色：{partyRole}（甲方/乙方）。
 
-【待审查合同文本】
+【合同文本】
 {contractText}
 
-【输出JSON格式规范】
+【企业制度关联】（RAG检索结果，优先适用）
+{companyPolicies}
+
+【审查任务】
+1. 提取关键商业条款：标的、金额、期限、付款方式、交付标准
+2. 识别不对称条款：单方解除权、单方变更权、免责条款、无限责任条款
+3. 评估财务风险：账期、预付款比例、违约金上限是否超过LPR四倍
+4. 检查合规要点：数据合规（如涉个人信息）、知识产权归属、竞业限制
+5. 缺失必备条款：保密、不可抗力、争议解决、通知送达
+
+【输出JSON Schema】
 {
-  "overallRisk": "high/medium/low - 基于风险等级精确定义判断",
-  "riskScore": 0-100的整数 - 100为无风险，低于60为高风险,
+  "metadata": {
+    "contractType": "识别出的合同类型",
+    "partyPosition": "我方地位（强势/弱势/对等）",
+    "reviewConfidence": 0.95,
+    "estimatedReviewTime": "人工复核建议时间（分钟）"
+  },
+  "overallAssessment": {
+    "riskLevel": "high/medium/low",
+    "riskScore": 78,
+    "riskDistribution": {
+      "fatal": 0,
+      "high": 2,
+      "medium": 3,
+      "low": 1
+    },
+    "executiveSummary": "给高管的摘要（50字内）：本合同存在X个重大风险，主要涉及XX方面，建议XX处理"
+  },
   "keyRisks": [
     {
-      "clause": "原文引用（控制在50字内，保留关键表述）",
-      "location": "具体条款位置，如'第5条第3款'或'保密条款'",
-      "riskType": "legal/commercial/operational/ip",
-      "severity": "high/medium/low - 严格按精确定义分级",
-      "explanation": "风险分析（100字内），说明为什么这是风险及可能后果",
-      "suggestion": "【重要】必须提供可直接使用的替换条款文本，而非原则性建议",
-      "category": "具体风险类别，如'付款风险/知识产权风险/数据合规风险'",
-      "law": "相关法条引用（如有），如'《民法典》第585条'"
+      "id": "risk_001",
+      "severity": "high",
+      "category": "财务风险",
+      "riskType": "commercial",
+      "clauseLocation": "第X条第X款",
+      "originalText": "原文摘录（精确引用）",
+      "riskDescription": "具体风险说明（含法律依据）",
+      "legalBasis": ["《民法典》第585条", "公司《采购管理制度》第12条"],
+      "suggestedRevision": {
+        "revisionType": "修改/删除/补充",
+        "proposedText": "建议修改为：XXXXXXXX",
+        "rationale": "修改理由（从商业和法律角度）"
+      },
+      "businessImpact": "如不接受此风险，可能导致：XXX",
+      "negotiationStrategy": "谈判话术建议：建议贵司考虑...",
+      "mustFix": true
     }
   ],
-  "missingClauses": ["缺失的重要条款1", "缺失的重要条款2"],
-  "thinking": "整体分析思路（200字内）：合同类型判断、主要风险点概述、优先级排序建议"
+  "missingClauses": [
+    {
+      "clauseName": "保密条款",
+      "importance": "high",
+      "templateReference": "公司标准模板第X条",
+      "suggestedText": "建议添加：..."
+    }
+  ],
+  "financialTerms": {
+    "totalAmount": "合同总额（自动提取）",
+    "paymentTerms": "付款条件分析",
+    "penaltyAnalysis": "违约金评估（是否过高/过低）",
+    "financialExposure": "最大潜在损失估算（如：合同金额20%）"
+  },
+  "complianceCheck": {
+    "dataCompliance": {"passed": false, "issues": ["缺少数据安全责任条款"]},
+    "ipCompliance": {"passed": true, "notes": "知识产权归属清晰"},
+    "antitrustRisk": {"passed": true, "notes": "无垄断风险"}
+  },
+  "thinking": {
+    "analysisProcess": "思维过程：我先看了付款条款，发现...然后看违约责任...",
+    "uncertainties": ["第X条表述模糊，需人工确认具体含义"],
+    "recommendedFocus": "建议法务重点复核：XXX条款"
+  }
 }
 
-【输出质量要求】
-1. **企业立场**：站在甲方角度识别不对等条款，而非中立审查
-2. **具体可执行**：每个suggestion必须是可直接复制替换的条款文本
-3. **量化风险**：high风险必须有明确的金额/责任/权益损失说明
-4. **法条支撑**：涉及法律风险必须引用具体法条条款号
-5. **类型适配**：根据合同类型（采购/销售/劳动/技术）调整审查重点
+【输出质量控制要求】
+1. **准确性**：引用的法条必须现行有效，公司名称必须与原文完全一致
+2. **具体性**：riskDescription必须包含"如果发生XX情况，将导致XX后果"的因果链
+3. **可操作性**：suggestedRevision必须是可以直接复制粘贴替换原文的完整条款
+4. **置信度标记**：对模糊表述（如"合理期限"），在thinking中标注"此处需人工确认行业惯例"
 
-【评分参考】
-- 90-100分：合同基本无风险，条款对等，保护机制完善
-- 75-89分：存在低风险问题，可接受但建议优化
-- 60-74分：存在中风险问题，建议修改后签署
-- 0-59分：存在高风险问题，必须修改否则不建议签署`;
+【禁止事项】
+- 禁止返回"建议咨询专业律师"等模糊结论
+- 禁止在JSON外添加任何解释文字
+- 禁止对明显合法的常规条款（如"双方签字盖章生效"）标记为风险`;
 
 // Mock AI Review for demo purposes
 export function generateMockAIReview(contractText: string): AIReview {
@@ -268,7 +321,12 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
       ? contractText.substring(0, maxLength) + '\n...（合同内容已截断）'
       : (contractText || '');
     
-    const prompt = REVIEW_PROMPT_TEMPLATE.replace('{contractText}', processedText);
+    const prompt = REVIEW_PROMPT_TEMPLATE
+      .replace('{contractText}', processedText)
+      .replace('{contractType}', '未知类型')
+      .replace('{contractAmount}', '未知')
+      .replace('{partyRole}', '未知')
+      .replace('{companyPolicies}', '暂无关联企业制度');
     
     console.log('Calling Qwen API...');
     console.log('API URL:', config.QWEN_API_URL);
@@ -343,30 +401,62 @@ export async function analyzeContractWithQwen(contractText: string): Promise<AIR
       throw new Error('Failed to parse API response as JSON');
     }
     
-    // Validate and format result
+    // Validate and format result - 适配新的JSON结构
     if (!result.keyRisks || !Array.isArray(result.keyRisks)) {
       console.warn('Response missing keyRisks, using fallback');
       result.keyRisks = [];
     }
     
+    // 适配新的overallAssessment结构或旧的overallRisk/riskScore
+    const overallRisk = result.overallAssessment?.riskLevel || result.overallRisk || 'medium';
+    const riskScore = result.overallAssessment?.riskScore || result.riskScore || 70;
+    
+    // 适配新的thinking结构
+    let thinkingText = 'AI分析完成';
+    if (typeof result.thinking === 'string') {
+      thinkingText = result.thinking;
+    } else if (result.thinking?.analysisProcess) {
+      thinkingText = result.thinking.analysisProcess;
+    }
+    
+    // 适配新的keyRisks结构
     const aiReview: AIReview = {
       id: `qwen-${Date.now()}`,
       contractId: '',
-      overallRisk: result.overallRisk || 'medium',
-      riskScore: typeof result.riskScore === 'number' ? result.riskScore : 70,
-      keyRisks: result.keyRisks.map((risk: any, index: number) => ({
-        id: `qwen-risk-${index + 1}`,
-        clause: risk.clause || '未指定',
-        location: risk.location || '未知位置',
-        riskType: risk.riskType || 'legal',
-        severity: risk.severity || 'medium',
-        explanation: risk.explanation || '无说明',
-        suggestion: risk.suggestion || '无建议',
-        category: risk.category || '一般风险',
-        law: risk.law,
-      })),
-      missingClauses: result.missingClauses || [],
-      thinking: result.thinking || 'AI分析完成',
+      overallRisk: overallRisk,
+      riskScore: typeof riskScore === 'number' ? riskScore : 70,
+      keyRisks: result.keyRisks.map((risk: any, index: number) => {
+        // 处理新的suggestedRevision结构或旧的suggestion字段
+        let suggestionText = '无建议';
+        if (risk.suggestedRevision?.proposedText) {
+          suggestionText = `${risk.suggestedRevision.revisionType}: ${risk.suggestedRevision.proposedText}`;
+        } else if (risk.suggestion) {
+          suggestionText = risk.suggestion;
+        }
+        
+        // 处理legalBasis数组或旧的law字符串
+        let lawText = risk.law;
+        if (risk.legalBasis && Array.isArray(risk.legalBasis)) {
+          lawText = risk.legalBasis.join('、');
+        }
+        
+        return {
+          id: risk.id || `qwen-risk-${index + 1}`,
+          clause: risk.originalText || risk.clause || '未指定',
+          location: risk.clauseLocation || risk.location || '未知位置',
+          riskType: risk.riskType || 'legal',
+          severity: risk.severity || 'medium',
+          explanation: risk.riskDescription || risk.explanation || '无说明',
+          suggestion: suggestionText,
+          category: risk.category || '一般风险',
+          law: lawText,
+        };
+      }),
+      missingClauses: (result.missingClauses || []).map((mc: any) => {
+        if (typeof mc === 'string') return mc;
+        return `${mc.clauseName}${mc.importance ? `(${mc.importance})` : ''}`;
+      }),
+      thinking: thinkingText,
       createdAt: new Date().toISOString(),
     };
     
@@ -395,7 +485,12 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
       ? contractText.substring(0, maxLength) + '\n...（已截断）'
       : (contractText || '');
     
-    const prompt = REVIEW_PROMPT_TEMPLATE.replace('{contractText}', processedText);
+    const prompt = REVIEW_PROMPT_TEMPLATE
+      .replace('{contractText}', processedText)
+      .replace('{contractType}', '未知类型')
+      .replace('{contractAmount}', '未知')
+      .replace('{partyRole}', '未知')
+      .replace('{companyPolicies}', '暂无关联企业制度');
     
     const response = await fetch(`${config.DEEPSEEK_API_URL}/chat/completions`, {
       method: 'POST',
@@ -432,17 +527,53 @@ export async function analyzeContractWithDeepSeek(contractText: string): Promise
     
     const result = JSON.parse(jsonStr);
     
+    // 适配新的overallAssessment结构或旧的overallRisk/riskScore
+    const overallRisk = result.overallAssessment?.riskLevel || result.overallRisk || 'medium';
+    const riskScore = result.overallAssessment?.riskScore || result.riskScore || 70;
+    
+    // 适配新的thinking结构
+    let thinkingText = '分析完成';
+    if (typeof result.thinking === 'string') {
+      thinkingText = result.thinking;
+    } else if (result.thinking?.analysisProcess) {
+      thinkingText = result.thinking.analysisProcess;
+    }
+    
     return {
       id: `deepseek-${Date.now()}`,
       contractId: '',
-      overallRisk: result.overallRisk || 'medium',
-      riskScore: result.riskScore || 70,
-      keyRisks: (result.keyRisks || []).map((risk: any, index: number) => ({
-        id: `deepseek-risk-${index + 1}`,
-        ...risk,
-      })),
-      missingClauses: result.missingClauses || [],
-      thinking: result.thinking || '分析完成',
+      overallRisk: overallRisk,
+      riskScore: typeof riskScore === 'number' ? riskScore : 70,
+      keyRisks: (result.keyRisks || []).map((risk: any, index: number) => {
+        // 处理新的suggestedRevision结构或旧的suggestion字段
+        let suggestionText = risk.suggestion || '无建议';
+        if (risk.suggestedRevision?.proposedText) {
+          suggestionText = `${risk.suggestedRevision.revisionType}: ${risk.suggestedRevision.proposedText}`;
+        }
+        
+        // 处理legalBasis数组或旧的law字符串
+        let lawText = risk.law;
+        if (risk.legalBasis && Array.isArray(risk.legalBasis)) {
+          lawText = risk.legalBasis.join('、');
+        }
+        
+        return {
+          id: risk.id || `deepseek-risk-${index + 1}`,
+          clause: risk.originalText || risk.clause || '未指定',
+          location: risk.clauseLocation || risk.location || '未知位置',
+          riskType: risk.riskType || 'legal',
+          severity: risk.severity || 'medium',
+          explanation: risk.riskDescription || risk.explanation || '无说明',
+          suggestion: suggestionText,
+          category: risk.category || '一般风险',
+          law: lawText,
+        };
+      }),
+      missingClauses: (result.missingClauses || []).map((mc: any) => {
+        if (typeof mc === 'string') return mc;
+        return `${mc.clauseName}${mc.importance ? `(${mc.importance})` : ''}`;
+      }),
+      thinking: thinkingText,
       createdAt: new Date().toISOString(),
     };
     
